@@ -55,6 +55,7 @@ time-tracker/
 │   ├── docs.md                # command reference
 │   ├── map.md
 │   └── schema.md
+├── LICENSE
 ├── makefile
 ├── pyproject.toml
 ├── README.md

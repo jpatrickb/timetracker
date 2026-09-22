@@ -3,7 +3,10 @@ name = "time-tracker"
 version = "0.1.0"
 description = "Track billable time from the terminal and turn it into invoices"
 readme = "README.md"
-requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Patrick Beal" }]
 dependencies = [
     "openpyxl>=3.1.5",
     "pendulum>=3.2.0",
