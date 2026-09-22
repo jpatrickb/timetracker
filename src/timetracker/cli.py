@@ -7,7 +7,6 @@
 import functools
 import sqlite3 as sq
 import sys
-import threading
 from typing import Annotated
 
 import typer
@@ -16,7 +15,7 @@ from rich.table import Table
 
 from pathlib import Path
 
-from timetracker import clients, clock, db, invoice, report, user
+from timetracker import clients, clock, db, invoice, report, tui, user
 from timetracker.formats import default_filename
 from timetracker.formats.delimited import render_csv, render_tsv
 from timetracker.formats.json_format import render_json
@@ -347,37 +346,14 @@ def clock_in(
 
 
 def _watch(conn: sq.Connection, entry: sq.Row):
-    """
-    Shows the elapsed time, updating every second on a background thread,
-    while the main thread waits for Enter.
-    """
-    stop = threading.Event()
-
-    def tick():
-        while True:
-            elapsed = clock.format_duration(clock.now() - entry["start_time"])
-            sys.stdout.write(
-                f"\r  {elapsed}  (Enter to clock out, Ctrl+C to leave running) "
-            )
-            sys.stdout.flush()
-            if stop.wait(1):
-                return
-
-    ticker = threading.Thread(target=tick, daemon=True)
-    ticker.start()
-    try:
-        input()
-    except (KeyboardInterrupt, EOFError):
-        stop.set()
-        ticker.join()
-        console.print(f"\nStill clocked in as entry {entry['entry_id']}.")
-        return
-    stop.set()
-    ticker.join()
-
-    desc = typer.prompt("Add to description (optional)", default="", show_default=False)
-    clock.clock_out(conn, entry["entry_id"], description=desc or None)
-    _print_clocked_out(clock.get_entry(conn, entry["entry_id"]))
+    """Opens the full-screen watch view over an open entry."""
+    outcome = tui.run_watch(conn, entry["entry_id"])
+    if outcome == "clocked out":
+        _print_clocked_out(clock.get_entry(conn, entry["entry_id"]))
+    elif outcome == "closed elsewhere":
+        console.print(f"Entry {entry['entry_id']} was clocked out elsewhere.")
+    else:
+        console.print(f"Detached. Still clocked in as entry {entry['entry_id']}.")
 
 
 def _print_clocked_out(entry: sq.Row):
@@ -415,6 +391,30 @@ def clock_out(
         overlaps = clock.clock_out(conn, entry_id, _parse(time), client, project, desc)
         _warn_overlaps(overlaps)
         _print_clocked_out(clock.get_entry(conn, entry_id))
+
+
+@app.command("watch")
+@handle_errors
+def watch(
+    entry_id: Annotated[
+        int | None, typer.Option("--id", help="Which open entry to attach to.")
+    ] = None,
+):
+    """Attach the live view to an entry you're already clocked in to."""
+    with db.connection() as conn:
+        if entry_id is None:
+            open_entries = clock.open_entries(conn)
+            if not open_entries:
+                raise TimeTrackerError("You're not clocked in.")
+            if len(open_entries) > 1:
+                ids = ", ".join(str(e["entry_id"]) for e in open_entries)
+                raise TimeTrackerError(f"Pass --id to choose. Open entries: {ids}")
+            entry_id = int(open_entries[0]["entry_id"])
+
+        entry = clock.get_entry(conn, entry_id)
+        if entry["end_time"] is not None:
+            raise TimeTrackerError(f"Entry {entry_id} is already clocked out.")
+        _watch(conn, entry)
 
 
 @app.command("add")

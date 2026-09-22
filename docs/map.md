@@ -22,6 +22,10 @@ Functionality is broken up by module. Items marked *(planned)* aren't built yet.
     - issue (allocating the client's next number), void, delete a draft
     - build the document a renderer needs: one row per project per day
     - invoice file names
+- `tui.py`: the `--watch` full-screen view (Textual)
+    - live wall clock, elapsed time, and earnings
+    - editable client/project/start, description editor with autosave
+    - today's entries, detach or clock out
 - `cli.py`: the `tt` command-line interface over the modules above
 - `errors.py`: `TimeTrackerError`, for user-facing errors shown without a traceback
 - `report.py`: reporting
@@ -72,13 +76,15 @@ time-tracker/
 │       │   └── xlsx.py
 │       ├── migrations
 │       │   └── 001_initial.sql
-│       └── report.py
+│       ├── report.py
+│       └── tui.py
 ├── tests
 │   ├── test_clients.py
 │   ├── test_clock.py
 │   ├── test_db.py
 │   ├── test_invoice.py
-│   └── test_report.py
+│   ├── test_report.py
+│   └── test_tui.py
 └── uv.lock
 ```
 

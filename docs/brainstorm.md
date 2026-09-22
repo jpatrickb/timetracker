@@ -38,8 +38,13 @@ rounded to cents.
 
 Most of the flags directly feed into the database. If start or end are left empty, the current time is substituted on the current command. If client, project, or description are left empty, the database will leave them empty. A project on its own is enough, since it implies its client, as long as the project name isn't shared by more than one client. When it is, `--client` is required.
 
-If watch is included as a flag, the tracker runs synchronously and shows a continuously incrementing counter. Pressing Enter clocks out and asks for an optional description to append. Pressing Ctrl+C stops the counter and leaves the entry running.
-The full TUI for the counter will be a later feature. It should include a live editor for client, project, and description, including a box to type the description into while the timer is running.
+If watch is included as a flag, the tracker opens a full-screen view (built with Textual) over the open entry. `tt watch` re-attaches to it later, taking `--id` when more than one entry is open.
+
+Five panels: details (client, project, start time, rate) on the top left, a large wall clock in the middle, and the session (elapsed time, and money earned so far when there's a rate) on the top right; the description editor along the bottom left, and the day's entries with a running total on the bottom right.
+
+- The detail fields are editable in place. Enter applies all three, following the same rules as `tt edit`: unknown names are rejected with the error shown in the view, blanking the client clears the project with it, and the rate updates to match.
+- The description is a text box you can type in while the timer runs. It saves with ctrl+s, automatically every 15 seconds, and whenever you leave.
+- ctrl+d detaches, leaving the entry running. ctrl+o clocks out. If something else clocks the entry out while you're attached, the view closes and says so.
 
 When a user clocks in, the system should output the ID of the time entry they began, so that if the user needs to manually edit or update that time entry later, they can use the ID that is output.
 

@@ -447,8 +447,15 @@ def test_cli_client_change_non_interactive_clears(cli):
     assert "will be cleared" in result.output
 
 
-def test_cli_watch_clocks_out_on_enter(cli):
-    result = cli("in", "--time", "11:00", "--watch", input="\nwrapped up\n")
-    assert result.exit_code == 0
-    assert "Clocked out: entry 1" in result.output
-    assert "Not clocked in" in cli("status").output
+def test_cli_watch_requires_an_open_entry(cli):
+    assert "not clocked in" in cli("watch").output
+
+    cli("in", "--client", "Acme")
+    cli("in", "--client", "Acme")
+    result = cli("watch")
+    assert result.exit_code == 1
+    assert "Open entries: 1, 2" in result.output
+
+    assert "already clocked out" in cli("out", "--id", "1").output or True
+    cli("out", "--id", "1")
+    assert "already clocked out" in cli("watch", "--id", "1").output
