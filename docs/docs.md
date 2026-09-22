@@ -79,7 +79,7 @@ tt report [--client C]... [--project P]... [--start YYYY-MM-DD] [--end YYYY-MM-D
 - **Filters.** Names and aliases work. Unknown names match nothing, with no error. A project name several clients share matches all of them unless `--client` narrows it.
 - **Grouping.** `entry` (the default) gives one row per entry. `day`, `week`, and `month` give one row per period, with lists of entries, clients, and projects, descriptions joined by blank lines, and totals. Sessions are split at local midnight (or week/month boundaries), and pay is divided in proportion.
 - **Fields.** Per entry: `id, start, end, client, project, description, duration, rate, pay`. Grouped: `period, id, client, project, description, duration, pay`.
-- **Output.** `table` prints to the terminal. `md`, `json`, `csv`, and `tsv` print plain text you can pipe, or save with `--write` to `reports/` next to the database. `--filename` picks the name, and a name with a folder in it is saved there instead. JSON gives times in ISO 8601 with the UTC offset, durations in seconds, and pay in dollars.
+- **Output.** `table` prints to the terminal. `md`, `json`, `csv`, and `tsv` print plain text you can pipe, or save with `--write` to `reports/` next to the database. `pdf` and `xlsx` always write a file. `--filename` picks the name, and a name with a folder in it is saved there instead. JSON gives times in ISO 8601 with the UTC offset, durations in seconds, and pay in dollars. The spreadsheet keeps dates, durations and money as real Excel values, so you can total or chart them.
 - **Open entries** are left out, with a warning saying how many.
 
 ## Invoices

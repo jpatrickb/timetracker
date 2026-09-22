@@ -59,6 +59,12 @@ def total_row(report: Report) -> dict:
     return row
 
 
+def range_label(report: Report) -> str:
+    """e.g. '2026-09-21 to 2026-09-27, by day'."""
+    start = report.start.isoformat() if report.start else "the beginning"
+    return f"{start} to {report.end.isoformat()}, by {report.group_by}"
+
+
 def default_filename(report: Report, extension: str) -> str:
     """e.g. report-2026-09-21-to-2026-09-27-by-day.csv"""
     start = report.start.isoformat() if report.start else "beginning"
