@@ -25,11 +25,17 @@ Everything is stored in one SQLite file, with times kept as UTC so daylight savi
 
 ## Install
 
+Needs Python 3.11 or newer. With [uv](https://docs.astral.sh/uv/):
+
 ```
-uv tool install --editable .
+uv tool install git+https://github.com/jpatrickb/timetracker
 ```
 
-That puts `tt` on your PATH. Then set up your details, which invoices are built from:
+Or with pipx: `pipx install git+https://github.com/jpatrickb/timetracker`. To try it without installing anything: `uvx --from git+https://github.com/jpatrickb/timetracker tt status`.
+
+Working on the code instead? Clone it and run `uv tool install --editable .`, which picks up your changes as you make them.
+
+Either way that puts `tt` on your PATH. Then set up your details, which invoices are built from:
 
 ```
 tt setup
@@ -75,3 +81,7 @@ make init-db       # rebuild dev/dev.db from the migrations
 Work against the development database with `TIMETRACKER_DB=dev/dev.db tt ...`, so the real one stays untouched.
 
 Schema changes go in a new numbered file in `src/timetracker/migrations/`. Applied migrations are never edited: the app applies any missing ones when it opens the database, each in its own transaction.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
