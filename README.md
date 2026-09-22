@@ -18,7 +18,7 @@ $ tt report --start 2026-09-01 --end 2026-09-14 --invoice
 - **Clock in and out**, or log finished entries after the fact, with a client, project, and description.
 - **A live view** (`--watch`): a wall clock, elapsed time, what you've earned so far, and a description box you can type in while the timer runs. Detach and re-attach without ending the entry.
 - **Clients and projects** with aliases and hourly rates. A project inherits its client's rate and follows changes to it, unless it has its own.
-- **Reports** filtered by client, project, and date, grouped by entry, day, week, or month, as a terminal table, Markdown, JSON, CSV, or TSV.
+- **Reports** filtered by client, project, and date, grouped by entry, day, week, or month, as a terminal table, Markdown, JSON, CSV, TSV, PDF, or Excel.
 - **Invoices** as PDF or Excel, with per-client numbering, drafts, issuing, and voiding. Issued invoices can't be quietly changed: their entries are locked against edits and deletes until the invoice is voided.
 
 Everything is stored in one SQLite file, with times kept as UTC so daylight saving changes never alter a duration.

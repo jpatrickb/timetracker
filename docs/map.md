@@ -37,8 +37,8 @@ Functionality is broken up by module. Items marked *(planned)* aren't built yet.
     - `table.py`: terminal table and Markdown
     - `delimited.py`: CSV and TSV
     - `json_format.py`: JSON
-    - `xlsx.py`: invoice as an Excel workbook (openpyxl)
-    - `pdf.py`: invoice as a PDF, typeset with Typst
+    - `xlsx.py`: invoice and report as Excel workbooks (openpyxl)
+    - `pdf.py`: invoice and report as PDFs, typeset with Typst
 - Invoice management *(planned)*
     - generate draft, issue, void, delete draft
 

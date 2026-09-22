@@ -558,7 +558,10 @@ TEXT_OUTPUTS = {
     "csv": (render_csv, "csv"),
     "tsv": (render_tsv, "tsv"),
 }
-OUTPUTS = ("table", *TEXT_OUTPUTS)
+
+# Binary formats can't be piped, so these always write a file
+FILE_OUTPUTS = ("pdf", "xlsx")
+OUTPUTS = ("table", *TEXT_OUTPUTS, *FILE_OUTPUTS)
 
 
 @app.command("report")
@@ -586,7 +589,8 @@ def report_command(
         typer.Option("--fields", help="Comma-separated columns, e.g. id,project,pay."),
     ] = None,
     output: Annotated[
-        str, typer.Option("--output", help="table, md, json, csv, or tsv.")
+        str,
+        typer.Option("--output", help="table, md, json, csv, tsv, pdf, or xlsx."),
     ] = "table",
     write: Annotated[
         bool, typer.Option("--write", help="Save to the reports folder.")
@@ -652,6 +656,19 @@ def report_command(
 
     if output == "table":
         console.print(render_table(result))
+        return
+
+    if output in FILE_OUTPUTS:
+        path = _report_path(filename or default_filename(result, output))
+        if output == "pdf":
+            from timetracker.formats.pdf import render_report_pdf
+
+            render_report_pdf(result, path)
+        else:
+            from timetracker.formats.xlsx import render_report_xlsx
+
+            render_report_xlsx(result, path)
+        console.print(f"Saved {path}")
         return
 
     render, extension = TEXT_OUTPUTS[output]

@@ -1,7 +1,9 @@
 import csv
 import io
 import json
-from datetime import date
+from datetime import date, datetime, timedelta
+
+import openpyxl
 
 import pendulum
 import pytest
@@ -283,8 +285,107 @@ def test_cli_warns_about_open_entries(cli):
 
 
 @pytest.mark.parametrize(
-    "args", [("--group-by", "year"), ("--output", "pdf"), ("--start", "9/1")]
+    "args", [("--group-by", "year"), ("--output", "docx"), ("--start", "9/1")]
 )
 def test_cli_rejects_bad_options(cli, args):
     result = cli("report", *args)
     assert result.exit_code == 1
+
+
+# --- PDF and Excel ---
+
+
+def test_report_xlsx_keeps_values_typed(conn, tmp_path):
+    from timetracker.formats.xlsx import render_report_xlsx
+
+    add(conn, "08:00", "09:30", client="TFA", description="A\n\nB")
+    rep = report.build_report(conn, start=date(2026, 9, 29))
+    path = tmp_path / "report.xlsx"
+    render_report_xlsx(rep, path)
+
+    sheet = openpyxl.load_workbook(path).active
+    assert sheet is not None
+    assert sheet["A1"].value == "TIME REPORT"
+    assert sheet["A2"].value == "2026-09-29 to 2026-09-29, by entry"
+
+    headers = [c.value for c in sheet[4]]
+    assert headers == [
+        "ID",
+        "Start",
+        "End",
+        "Client",
+        "Project",
+        "Description",
+        "Duration",
+        "Rate",
+        "Pay",
+    ]
+
+    duration = sheet.cell(row=5, column=headers.index("Duration") + 1)
+    assert duration.value == timedelta(seconds=5400)
+    assert duration.number_format == "[h]:mm:ss"
+    pay = sheet.cell(row=5, column=headers.index("Pay") + 1)
+    assert pay.value == 52.5
+    start = sheet.cell(row=5, column=headers.index("Start") + 1)
+    assert start.value == datetime(2026, 9, 29, 8, 0)
+
+
+def test_report_xlsx_total_lines_up_with_its_columns(conn, tmp_path):
+    from timetracker.formats.xlsx import render_report_xlsx
+
+    add(conn, "08:00", "09:00", client="TFA")
+    add(conn, "10:00", "11:00", client="TFA")
+    rep = report.build_report(
+        conn,
+        start=date(2026, 9, 29),
+        group_by="day",
+        fields=["period", "duration", "pay"],
+    )
+    path = tmp_path / "grouped.xlsx"
+    render_report_xlsx(rep, path)
+
+    sheet = openpyxl.load_workbook(path).active
+    assert sheet is not None
+    total = sheet[sheet.max_row]
+    assert [c.value for c in total] == [
+        "Total",
+        timedelta(seconds=7200),
+        70.0,
+    ]
+
+
+def test_report_pdf_is_written_and_turns_landscape(conn, tmp_path):
+    from timetracker.formats.pdf import _report_source, render_report_pdf
+
+    add(conn, "08:00", "09:00", client="TFA", description="Piped | text")
+    wide = report.build_report(conn, start=date(2026, 9, 29))
+    narrow = report.build_report(
+        conn, start=date(2026, 9, 29), fields=["id", "duration"]
+    )
+
+    assert "flipped: true" in _report_source(wide)
+    assert "flipped" not in _report_source(narrow)
+
+    path = tmp_path / "report.pdf"
+    render_report_pdf(wide, path)
+    assert path.read_bytes().startswith(b"%PDF")
+
+
+def test_report_pdf_keeps_multiline_descriptions(conn, tmp_path):
+    from timetracker.formats.pdf import _report_source
+
+    add(conn, "08:00", "09:00", client="TFA", description="First\n\nSecond")
+    rep = report.build_report(conn, start=date(2026, 9, 29), fields=["description"])
+    source = _report_source(rep)
+    assert "First \\\nSecond" in source
+
+
+def test_cli_pdf_and_xlsx_write_without_the_write_flag(cli, tmp_path):
+    assert cli("report", "--output", "xlsx").exit_code == 0
+    assert (
+        cli("report", "--output", "pdf", "--filename", "out/hours.pdf").exit_code == 0
+    )
+
+    saved = list((tmp_path / "data" / "reports").iterdir())
+    assert [p.name for p in saved] == ["report-2026-09-28-to-2026-10-04-by-entry.xlsx"]
+    assert (tmp_path / "out" / "hours.pdf").exists()

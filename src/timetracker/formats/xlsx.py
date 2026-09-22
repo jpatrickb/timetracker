@@ -7,8 +7,12 @@
 from datetime import timedelta
 from pathlib import Path
 
+import pendulum
+
 from timetracker.errors import TimeTrackerError
+from timetracker.formats import header, range_label, total_row
 from timetracker.invoice import InvoiceDocument, period_label
+from timetracker.report import Report
 from timetracker.user import address_lines, full_name
 
 HEADERS = ("Date", "Project", "Hours", "Amount", "Description")
@@ -93,3 +97,83 @@ def render_xlsx(document: InvoiceDocument, path: Path):
 
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(path)
+
+
+# --- Reports ---
+
+REPORT_FORMATS = {
+    "start": "M/d/yyyy h:mm:ss",
+    "end": "M/d/yyyy h:mm:ss",
+    "duration": HOURS_FORMAT,
+    "rate": MONEY_FORMAT,
+    "pay": MONEY_FORMAT,
+}
+
+
+def render_report_xlsx(report: Report, path: Path):
+    """A report as a spreadsheet, with real dates, durations, and money."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        raise TimeTrackerError(
+            "Excel output needs openpyxl. Reinstall the app with `uv sync`."
+        ) from None
+
+    workbook = Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.title = "Report"
+    bold = Font(bold=True)
+
+    sheet["A1"] = "TIME REPORT"
+    sheet["A1"].font = bold
+    sheet["A2"] = range_label(report)
+
+    header_row = 4
+    for column, field in enumerate(report.fields, start=1):
+        cell = sheet.cell(row=header_row, column=column, value=header(report, field))
+        cell.font = bold
+
+    for offset, row in enumerate(report.rows, start=1):
+        _write_report_row(sheet, header_row + offset, report, row)
+
+    total_line = header_row + len(report.rows) + 1
+    _write_report_row(sheet, total_line, report, total_row(report))
+    for column in range(1, len(report.fields) + 1):
+        sheet.cell(row=total_line, column=column).font = bold
+
+    for column, field in enumerate(report.fields, start=1):
+        letter = get_column_letter(column)
+        sheet.column_dimensions[letter].width = 60 if field == "description" else 20
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(path)
+
+
+def _write_report_row(sheet, row_number: int, report: Report, row: dict):
+    from openpyxl.styles import Alignment
+
+    for column, field in enumerate(report.fields, start=1):
+        cell = sheet.cell(row=row_number, column=column)
+        cell.value = _xlsx_value(field, row[field])
+        if row[field] is not None and field in REPORT_FORMATS:
+            cell.number_format = REPORT_FORMATS[field]
+        if field == "description":
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def _xlsx_value(field: str, value):
+    """Numbers, dates, and durations stay typed so Excel can work with them."""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    if field in ("start", "end") and isinstance(value, int):
+        return pendulum.from_timestamp(value, tz="local").naive()
+    if field == "duration" and isinstance(value, int):
+        return timedelta(seconds=value)
+    if field == "pay" and isinstance(value, int):
+        return value / 100
+    return value

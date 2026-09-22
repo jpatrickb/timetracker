@@ -122,7 +122,7 @@ For the outputs, PDF and Excel will need to automatically be written to disc. In
 Even though only issued invoices have an invoice number, drafts should be populated with an invoice number based on incrementing so the files are generated and are ready-to-send, and then the database is updated with the invoice number once it is sent. If multiple drafts are created, they will all still contain the same invoice number.
 A single invoice covers exactly one client. Multi-client filters remain valid for reports, but `--invoice` requires the selection to resolve to one client.
 
-Markdown, JSON, CSV, and TSV can all be printed to the terminal, but should optionally be saved to disc by using a flag. `--write` saves to a `reports/` folder next to the database, with a default name like `report-2026-09-21-to-2026-09-27-by-day.csv`. `--filename` implies `--write`. A bare file name goes in `reports/`, and a name with a folder in it is used as given. The terminal table can only be printed, not saved; use `md` instead.
+Markdown, JSON, CSV, and TSV can all be printed to the terminal, but should optionally be saved to disc by using a flag. PDF and Excel are files by nature, so those always write and don't need `--write`. A PDF report switches to landscape when it has more than five columns. `--write` saves to a `reports/` folder next to the database, with a default name like `report-2026-09-21-to-2026-09-27-by-day.csv`. `--filename` implies `--write`. A bare file name goes in `reports/`, and a name with a folder in it is used as given. The terminal table can only be printed, not saved; use `md` instead.
 
 Generating an invoice creates it with status draft and links its entries. Drafts can be regenerated freely and do not mark anything as billed. Issuing a draft sets a status to issued, which is the point at which its entries count as billed and become excluded from future invoices by default.
 Regenerating an invoice reads its entries through invoice entries rather than rerunning the original filters, so a regenerated invoice always matches the one that was issued.
@@ -141,7 +141,7 @@ Given these requirements, we should have these flags:
 - Project `--project "TF Proforma" [--project "Wedding Platform"]`
 - Start date `--start 2026-09-01`
 - End date `--end 2026-09-30`
-- Output format `--output table` / `md` / `json` / `csv` / `tsv` (built), `pdf` / `xlsx` (with invoices)
+- Output format `--output table` / `md` / `json` / `csv` / `tsv` / `pdf` / `xlsx`
 - Fields `--fields id,client,project,duration`. Per entry: `id, start, end, client, project, description, duration, rate, pay`. Grouped: `period, id, client, project, description, duration, pay`
 - Group by `--group-by entry|day|week|month`
 - Invoice t/f `--invoice` (not built yet)
