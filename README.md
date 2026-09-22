@@ -78,7 +78,13 @@ uv run pytest      # run the tests
 make init-db       # rebuild dev/dev.db from the migrations
 ```
 
-Work against the development database with `TIMETRACKER_DB=dev/dev.db tt ...`, so the real one stays untouched.
+Work against the development database with `TIMETRACKER_DB=dev/dev.db uv run tt ...`, so the real one stays untouched.
+
+The installed `tt` is a snapshot of a pushed commit, not your working tree, so work in progress can never break the command you rely on for real hours. Test changes with `uv run tt` from this folder, and once they're pushed, update the installed copy:
+
+```
+uv tool upgrade time-tracker
+```
 
 Schema changes go in a new numbered file in `src/timetracker/migrations/`. Applied migrations are never edited: the app applies any missing ones when it opens the database, each in its own transaction.
 
