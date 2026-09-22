@@ -42,28 +42,29 @@ CREATE TABLE IF NOT EXISTS invoices (
   client_id INTEGER NOT NULL REFERENCES clients(client_id),
   date_generated INTEGER NOT NULL,
   status TEXT NOT NULL CHECK (status in ('draft', 'issued', 'void')),
-  CONSTRAINT unique_client_invoice UNIQUE (client_id, invoice_number)
+  CONSTRAINT unique_client_invoice UNIQUE (client_id, invoice_number),
+  -- Drafts have no number, issued and void invoices always do
+  CONSTRAINT number_matches_status CHECK ((status = 'draft') = (invoice_number IS NULL))
 );
 
 CREATE TABLE IF NOT EXISTS invoice_entries (
-  invoice_entry_id INTEGER UNIQUE NOT NULL,
   invoice_id INTEGER NOT NULL REFERENCES invoices(invoice_id) ON DELETE CASCADE,
   entry_id INTEGER NOT NULL REFERENCES time_entries(entry_id) ON DELETE CASCADE,
   PRIMARY KEY (invoice_id, entry_id)
 );
 
 CREATE TABLE IF NOT EXISTS user_info (
-  user_id INTEGER PRIMARY KEY,
+  user_id INTEGER PRIMARY KEY CHECK (user_id = 1),
   first_name TEXT NOT NULL,
   last_name TEXT NOT NULL,
   address_line_1 TEXT NOT NULL,
   address_line_2 TEXT,
   city TEXT NOT NULL,
   state TEXT NOT NULL,
-  zip_code INTEGER NOT NULL
+  zip_code TEXT NOT NULL
 );
 
--- Protect against entry added into issued invoice
+-- Issuing aborts if any of the invoice's entries already sit on another issued invoice
 CREATE TRIGGER IF NOT EXISTS trg_invoice_issue_no_double_billing
 BEFORE UPDATE OF status ON invoices
 FOR EACH ROW
@@ -71,6 +72,33 @@ WHEN NEW.status = 'issued' AND OLD.status <> 'issued'
 BEGIN
   SELECT RAISE(ABORT, 'entry already billed on an issued invoice')
   WHERE EXISTS (
-    SELECT mine. -- IN PROGRESS: RESUME HERE
+    SELECT 1
+    FROM invoice_entries AS mine
+    JOIN invoice_entries AS other
+      ON other.entry_id = mine.entry_id
+      AND other.invoice_id <> mine.invoice_id
+    JOIN invoices AS other_invoice
+      ON other_invoice.invoice_id = other.invoice_id
+    WHERE mine.invoice_id = NEW.invoice_id
+      AND other_invoice.status = 'issued'
   );
+END;
+
+-- Entries can only be linked while the invoice is still a draft
+CREATE TRIGGER IF NOT EXISTS trg_invoice_entries_draft_only
+BEFORE INSERT ON invoice_entries
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'entries can only be added to a draft invoice')
+  WHERE (SELECT status FROM invoices WHERE invoice_id = NEW.invoice_id) <> 'draft';
+END;
+
+-- Every linked entry must belong to the invoice's client
+CREATE TRIGGER IF NOT EXISTS trg_invoice_entries_same_client
+BEFORE INSERT ON invoice_entries
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'entry belongs to a different client than the invoice')
+  WHERE (SELECT client_id FROM invoices WHERE invoice_id = NEW.invoice_id)
+    IS NOT (SELECT client_id FROM time_entries WHERE entry_id = NEW.entry_id);
 END;
