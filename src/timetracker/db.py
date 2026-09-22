@@ -7,9 +7,13 @@
 import os
 import sqlite3 as sq
 import tomllib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pendulum import DateTime
+
+from timetracker.clients import resolve_client, resolve_project
 
 DEFAULT_DB_PATH = Path("~/TimeTracker/timetracker.db")
 CONFIG_PATH = Path("~/.config/timetracker/config.toml")
@@ -93,53 +97,17 @@ def connect(db_path: str | Path | None = None) -> sq.Connection:
     return conn
 
 
-def resolve_client(conn: sq.Connection, client_name: str | None):
-    # If there's no client name passed in, don't need to get an ID
-    if not client_name:
-        return None
-
-    # Create cursor
-    cursor = conn.cursor()
-
-    # Search client_alias table for matching name/alias
-    cursor.execute(
-        "SELECT client_id FROM client_alias WHERE client_alias_text = ?", (client_name,)
-    )
-    row = cursor.fetchone()
-
-    # Throw error if client name is not found
-    if not row:
-        raise ValueError(
-            f"Client does not exist: {client_name} not found in database. Create new client first."
-        )
-
-    # Return if it is found
-    return row["client_id"]
-
-
-def resolve_project(conn: sq.Connection, project_name: str | None):
-    # If there's no project name passed in, don't need to get an ID
-    if not project_name:
-        return None
-
-    # Create cursor
-    cursor = conn.cursor()
-
-    # Search project_alias table for matching name/alias
-    cursor.execute(
-        "SELECT project_id FROM project_alias WHERE project_alias_text = ?",
-        (project_name,),
-    )
-    row = cursor.fetchone()
-
-    # Throw error if project name is not found
-    if not row:
-        raise ValueError(
-            f"Project does not exist: {project_name} not found in database. Create new project first."
-        )
-
-    # Return if it is found
-    return row["project_id"]
+@contextmanager
+def connection(db_path: str | Path | None = None) -> Iterator[sq.Connection]:
+    """
+    `with db.connection() as conn:` opens the database and always closes it.
+    (sqlite3's own `with conn:` only commits or rolls back, it never closes.)
+    """
+    conn = connect(db_path)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def get_pay_rate(conn: sq.Connection, client_id: int | None, project_id: int | None):
@@ -176,7 +144,7 @@ def start_entry(
 
     # Get client and project id
     client_id = resolve_client(conn, client)
-    project_id = resolve_project(conn, project)
+    project_id = resolve_project(conn, project, client_id)
 
     # Get pay rate
     pay_rate = get_pay_rate(conn, client_id, project_id)

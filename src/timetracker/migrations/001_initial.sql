@@ -12,28 +12,35 @@ CREATE TABLE IF NOT EXISTS time_entries (
 
 CREATE TABLE IF NOT EXISTS clients (
   client_id INTEGER PRIMARY KEY,
-  client_name TEXT NOT NULL UNIQUE,
-  pay_rate_hourly FLOAT
+  client_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  pay_rate_hourly FLOAT CHECK (pay_rate_hourly >= 0.0)
 );
 
 CREATE TABLE IF NOT EXISTS projects (
   project_id INTEGER PRIMARY KEY,
-  project_name TEXT NOT NULL,
+  project_name TEXT NOT NULL COLLATE NOCASE,
   client_id INTEGER NOT NULL REFERENCES clients(client_id),
-  pay_rate_hourly FLOAT,
-  CONSTRAINT unique_client_project_pair UNIQUE (client_id, project_name)
+  pay_rate_hourly FLOAT CHECK (pay_rate_hourly >= 0.0),
+  CONSTRAINT unique_client_project_pair UNIQUE (client_id, project_name),
+  -- Lets project_alias reference the (project, client) pair below
+  CONSTRAINT unique_project_client UNIQUE (project_id, client_id)
 );
 
 CREATE TABLE IF NOT EXISTS client_alias (
   client_alias_id INTEGER PRIMARY KEY,
-  client_alias_text TEXT NOT NULL UNIQUE,
+  client_alias_text TEXT NOT NULL UNIQUE COLLATE NOCASE,
   client_id INTEGER NOT NULL REFERENCES clients(client_id)
 );
 
 CREATE TABLE IF NOT EXISTS project_alias (
   project_alias_id INTEGER PRIMARY KEY,
-  project_alias_text TEXT NOT NULL UNIQUE,
-  project_id INTEGER NOT NULL REFERENCES projects(project_id)
+  project_alias_text TEXT NOT NULL COLLATE NOCASE,
+  project_id INTEGER NOT NULL,
+  -- Copied from the project so aliases can be unique per client
+  client_id INTEGER NOT NULL,
+  CONSTRAINT unique_client_project_alias UNIQUE (client_id, project_alias_text),
+  -- Composite key guarantees client_id matches the project's actual client
+  FOREIGN KEY (project_id, client_id) REFERENCES projects(project_id, client_id)
 );
 
 CREATE TABLE IF NOT EXISTS invoices (

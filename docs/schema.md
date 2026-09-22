@@ -44,6 +44,8 @@ Serves to store the list of projects.
 
 ## Client Alias
 
+All client and project names and aliases compare case-insensitively (`COLLATE NOCASE`), so `tfa` finds `TFA` and the two count as a collision.
+
 This table stores client aliases so that we can refer to a specific client using various different names. When a new client is created, the actual name of the client is inserted into this table as the first alias so that when we are searching for companies by names, we only need to check this table and don't need to check the client table as well.
 
 | Column Name | Data Type | PK | Unique | Check | Nullable |
@@ -59,8 +61,13 @@ This table stores project aliases so that we can refer to a specific project usi
 | Column Name | Data Type | PK | Unique | Check | Nullable |
 |---|---|---|---|---|---|
 | Project alias ID | int | T | T |  | F |
-| Project Alias text | str | F | T |  | F |
+| Project Alias text | str | F | Unique per client |  | F |
 | Project ID (FK) | int | F | F |  | F |
+| Client ID | int (composite FK with Project ID → Projects) | F | F | must match the project's client | F |
+
+Project names are only unique within a client, so the alias table carries the client ID
+to scope uniqueness. The composite foreign key on (Project ID, Client ID) guarantees the
+copied client ID always matches the project's real client.
 
 ## Invoices
 
