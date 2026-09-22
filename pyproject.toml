@@ -1,14 +1,16 @@
 [project]
 name = "time-tracker"
 version = "0.1.0"
-description = "Add your description here"
+description = "Track billable time from the terminal and turn it into invoices"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "openpyxl>=3.1.5",
     "pendulum>=3.2.0",
     "rich>=15.0.0",
     "textual>=8.2.8",
     "typer>=0.27.2",
+    "typst>=0.15.0",
 ]
 
 [tool.pyright]
@@ -17,14 +19,6 @@ venv = ".venv"
 
 [project.scripts]
 tt = "timetracker.cli:app"
-
-[project.optional-dependencies]
-pdf = [
-    "typst>=0.15.0",
-]
-xlsx = [
-    "openpyxl>=3.1.5",
-]
 
 [build-system]
 requires = ["hatchling"]
@@ -37,7 +31,4 @@ packages = ["src/timetracker"]
 dev = [
     "pytest>=9.1.1",
     "time-machine>=3.5.0",
-    # The optional output formats, so tests can exercise them
-    "openpyxl>=3.1.5",
-    "typst>=0.15.0",
 ]

@@ -24,7 +24,7 @@ def render_xlsx(document: InvoiceDocument, path: Path):
         from openpyxl.styles import Alignment, Font
     except ImportError:
         raise TimeTrackerError(
-            "Excel output needs openpyxl. Install it with `uv sync --extra xlsx`."
+            "Excel output needs openpyxl. Reinstall the app with `uv sync`."
         ) from None
 
     workbook = Workbook()

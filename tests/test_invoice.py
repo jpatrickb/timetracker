@@ -91,7 +91,7 @@ def test_address_lines_skip_blanks(conn):
 
 def test_draft_holds_no_number_but_predicts_one(conn):
     entry = add(conn, "2026-09-01 09:00", "2026-09-01 10:00", client="TFA")
-    invoice_id = draft(conn, [entry])
+    draft(conn, [entry])
     listed = invoice.list_invoices(conn)[0]
     assert listed["status"] == "draft"
     assert (listed["predicted"], listed["invoice_number"]) == (True, 1)

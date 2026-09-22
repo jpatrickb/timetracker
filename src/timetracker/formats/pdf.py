@@ -18,7 +18,7 @@ def render_pdf(document: InvoiceDocument, path: Path):
         import typst
     except ImportError:
         raise TimeTrackerError(
-            "PDF output needs typst. Install it with `uv sync --extra pdf`."
+            "PDF output needs typst. Reinstall the app with `uv sync`."
         ) from None
 
     source = _typst_source(document)
