@@ -26,6 +26,7 @@ Functionality is broken up by module. Items marked *(planned)* aren't built yet.
     - live wall clock, elapsed time, and earnings
     - editable client/project/start, description editor with autosave
     - today's entries, detach or clock out
+- `completion.py`: Tab-completion values (clients, projects, entries, invoices), read-only and silent on failure
 - `cli.py`: the `tt` command-line interface over the modules above
 - `errors.py`: `TimeTrackerError`, for user-facing errors shown without a traceback
 - `report.py`: reporting
@@ -63,6 +64,7 @@ time-tracker/
 │       ├── cli.py
 │       ├── clients.py
 │       ├── clock.py
+│       ├── completion.py
 │       ├── db.py
 │       ├── errors.py
 │       ├── invoice.py
@@ -81,6 +83,7 @@ time-tracker/
 ├── tests
 │   ├── test_clients.py
 │   ├── test_clock.py
+│   ├── test_completion.py
 │   ├── test_db.py
 │   ├── test_invoice.py
 │   ├── test_report.py
