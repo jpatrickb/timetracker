@@ -74,7 +74,11 @@ CREATE TABLE IF NOT EXISTS user_info (
   address_line_2 TEXT,
   city TEXT NOT NULL,
   state TEXT NOT NULL,
-  zip_code TEXT NOT NULL
+  zip_code TEXT NOT NULL,
+  -- Optional contact and payment details, left off the invoice when blank
+  email TEXT,
+  phone TEXT,
+  payment_notes TEXT
 );
 
 -- Issuing aborts if any of the invoice's entries already sit on another issued invoice

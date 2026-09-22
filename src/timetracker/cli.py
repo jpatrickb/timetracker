@@ -16,7 +16,7 @@ from rich.table import Table
 
 from pathlib import Path
 
-from timetracker import clients, clock, db, report
+from timetracker import clients, clock, db, invoice, report, user
 from timetracker.formats import default_filename
 from timetracker.formats.delimited import render_csv, render_tsv
 from timetracker.formats.json_format import render_json
@@ -27,7 +27,11 @@ app = typer.Typer(no_args_is_help=True)
 client_app = typer.Typer(no_args_is_help=True, help="Manage clients.")
 project_app = typer.Typer(no_args_is_help=True, help="Manage projects.")
 app.add_typer(client_app, name="client")
+invoice_app = typer.Typer(no_args_is_help=True, help="Manage invoices.")
+user_app = typer.Typer(no_args_is_help=True, help="Your details, used on invoices.")
 app.add_typer(project_app, name="project")
+app.add_typer(invoice_app, name="invoice")
+app.add_typer(user_app, name="user")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -593,12 +597,31 @@ def report_command(
             "--filename", help="File name or path to save to. Implies --write."
         ),
     ] = None,
+    make_invoice: Annotated[
+        bool,
+        typer.Option("--invoice", help="Create a draft invoice from this selection."),
+    ] = False,
+    include_billed: Annotated[
+        bool,
+        typer.Option(
+            "--include-billed",
+            help="With --invoice, also include entries already billed.",
+        ),
+    ] = False,
 ):
     """
     Report logged time. Defaults to this week, one row per entry.
 
     Entries count toward the range they start in. Open entries are left out.
     """
+    if make_invoice:
+        _make_invoice(client, project, start, end, output, include_billed)
+        return
+    if include_billed:
+        raise TimeTrackerError(
+            "--include-billed only applies with --invoice. Reports include "
+            "billed entries already."
+        )
     if group_by not in report.GROUP_BY_OPTIONS:
         raise TimeTrackerError(
             f"Unknown --group-by '{group_by}'. Use {', '.join(report.GROUP_BY_OPTIONS)}."
@@ -644,6 +667,74 @@ def report_command(
     console.print(f"Saved {path}")
 
 
+def _make_invoice(
+    client: list[str] | None,
+    project: list[str] | None,
+    start: str | None,
+    end: str | None,
+    output: str,
+    include_billed: bool,
+):
+    """
+    Creates a draft invoice from a report selection and writes its file.
+
+    Entries already on an issued invoice are left out unless --include-billed
+    is passed, which is what prevents double billing.
+    """
+    if output == "table":
+        output = "pdf"
+    _check_invoice_output(output)
+
+    with db.connection() as conn:
+        # Checked before anything is created, so a missing address can't
+        # leave a draft behind
+        user.require_user(conn)
+
+        result = report.build_report(
+            conn,
+            clients=client,
+            projects=project,
+            start=report.parse_date(start) if start else None,
+            end=report.parse_date(end) if end else None,
+            include_billed=include_billed,
+        )
+        if result.skipped_open:
+            plural = "entry" if result.skipped_open == 1 else "entries"
+            _warn(f"{result.skipped_open} open {plural} not invoiced.")
+
+        if len(result.client_ids) > 1:
+            names = ", ".join(sorted({str(row["client"]) for row in result.rows}))
+            raise TimeTrackerError(
+                f"An invoice covers one client, but this selection has {names}. "
+                "Narrow it with --client."
+            )
+        if not result.entry_ids or result.client_ids == [None]:
+            raise TimeTrackerError(
+                "No billable entries for that selection. Entries need a client, "
+                "and billed ones are excluded unless you pass --include-billed."
+            )
+
+        invoice_id = invoice.create_draft(
+            conn,
+            result.client_ids[0],
+            result.start or result.first_day or result.end,
+            result.end,
+            result.entry_ids,
+        )
+        try:
+            path = _render_invoice(conn, invoice_id, output)
+        except Exception:
+            # Don't leave a draft behind if the file couldn't be written
+            invoice.delete_draft(conn, invoice_id)
+            raise
+
+    console.print(
+        f"Created draft invoice [bold]{invoice_id}[/bold] with "
+        f"{len(result.entry_ids)} entries. Saved {path}"
+    )
+    console.print(f"Issue it with `tt invoice issue {invoice_id}` when you send it.")
+
+
 def _report_path(filename: str) -> Path:
     """
     A bare file name goes in the reports folder next to the database. A name
@@ -653,3 +744,204 @@ def _report_path(filename: str) -> Path:
     if path.is_absolute() or len(path.parts) > 1:
         return path
     return db.resolve_db_path().parent / "reports" / path
+
+
+# --- Invoices ---
+
+INVOICE_OUTPUTS = ("pdf", "xlsx")
+
+
+def _render_invoice(conn: sq.Connection, invoice_id: int, output: str) -> Path:
+    """Builds the document and writes it to the invoices folder."""
+    document = invoice.build_document(conn, invoice_id)
+    path = db.resolve_db_path().parent / "invoices" / invoice.filename(document, output)
+
+    if output == "pdf":
+        from timetracker.formats.pdf import render_pdf
+
+        render_pdf(document, path)
+    else:
+        from timetracker.formats.xlsx import render_xlsx
+
+        render_xlsx(document, path)
+    return path
+
+
+@invoice_app.command("list")
+@handle_errors
+def invoice_list():
+    """List invoices. Draft numbers are the one they'd get if issued."""
+    with db.connection() as conn:
+        rows = invoice.list_invoices(conn)
+
+    table = Table("ID", "Number", "Client", "Period", "Status", "Hours", "Total")
+    for row in rows:
+        number = f"#{row['invoice_number']}"
+        if row["predicted"]:
+            number += " (predicted)"
+        table.add_row(
+            str(row["invoice_id"]),
+            number,
+            row["client_name"],
+            f"{row['period_start']} to {row['period_end']}",
+            row["status"],
+            clock.format_duration(row["seconds"]),
+            "" if row["cents"] is None else f"${row['cents'] / 100:,.2f}",
+        )
+    console.print(table)
+
+
+@invoice_app.command("issue")
+@handle_errors
+def invoice_issue(
+    invoice_id: Annotated[int, typer.Argument(help="Draft to issue.")],
+    output: Annotated[str, typer.Option("--output", help="pdf or xlsx.")] = "pdf",
+):
+    """
+    Issue a draft: allocate its number, mark its entries billed, and write
+    the file again with the confirmed number.
+    """
+    _check_invoice_output(output)
+    with db.connection() as conn:
+        number = invoice.issue(conn, invoice_id)
+        path = _render_invoice(conn, invoice_id, output)
+    console.print(f"Issued invoice #{number}. Saved {path}")
+
+
+@invoice_app.command("void")
+@handle_errors
+def invoice_void(
+    invoice_id: Annotated[int, typer.Argument(help="Issued invoice to void.")],
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip the confirmation.")
+    ] = False,
+):
+    """Void an issued invoice, releasing its entries to be billed again."""
+    with db.connection() as conn:
+        if not yes:
+            typer.confirm(f"Void invoice {invoice_id}?", abort=True)
+        invoice.void(conn, invoice_id)
+    console.print(f"Invoice {invoice_id} voided. Its number stays reserved.")
+
+
+@invoice_app.command("delete")
+@handle_errors
+def invoice_delete(
+    invoice_id: Annotated[int, typer.Argument(help="Draft to delete.")],
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip the confirmation.")
+    ] = False,
+):
+    """Delete a draft invoice. Issued and void invoices are kept."""
+    with db.connection() as conn:
+        if not yes:
+            typer.confirm(f"Delete draft invoice {invoice_id}?", abort=True)
+        invoice.delete_draft(conn, invoice_id)
+    console.print(f"Deleted draft invoice {invoice_id}.")
+
+
+@invoice_app.command("regenerate")
+@handle_errors
+def invoice_regenerate(
+    invoice_id: Annotated[int, typer.Argument(help="Invoice to write again.")],
+    output: Annotated[str, typer.Option("--output", help="pdf or xlsx.")] = "pdf",
+):
+    """
+    Write an invoice's file again from its linked entries, so it matches the
+    one that was issued rather than re-running the original filters.
+    """
+    _check_invoice_output(output)
+    with db.connection() as conn:
+        path = _render_invoice(conn, invoice_id, output)
+    console.print(f"Saved {path}")
+
+
+def _check_invoice_output(output: str):
+    if output not in INVOICE_OUTPUTS:
+        raise TimeTrackerError(
+            f"Invoices are {' or '.join(INVOICE_OUTPUTS)}, not '{output}'."
+        )
+
+
+# --- Setup and user details ---
+
+
+@app.command("setup")
+@handle_errors
+def setup():
+    """Choose where the database lives and enter your invoice details."""
+    configured = db.CONFIG_PATH.expanduser()
+    current = db.resolve_db_path()
+    chosen = typer.prompt("Database location", default=str(current))
+    if Path(chosen).expanduser() != current:
+        configured.parent.mkdir(parents=True, exist_ok=True)
+        configured.write_text(f'db_path = "{chosen}"\n')
+        console.print(f"Saved database location to {configured}")
+
+    with db.connection(chosen) as conn:
+        existing = user.get_user(conn)
+        values = {}
+        for field in user.WIZARD_ORDER:
+            default = (existing[field] if existing else None) or ""
+            optional = " (optional)" if field in user.OPTIONAL_FIELDS else ""
+            values[field] = typer.prompt(
+                f"{user.LABELS[field]}{optional}",
+                default=default,
+                show_default=bool(default),
+            )
+        user.save_user(conn, **values)
+    console.print("Setup complete.")
+
+
+@user_app.command("show")
+@handle_errors
+def user_show():
+    """Show the details that appear on your invoices."""
+    with db.connection() as conn:
+        details = user.get_user(conn)
+    if details is None:
+        console.print("No details yet. Run `tt setup`.")
+        return
+
+    table = Table("Field", "Value", show_header=False)
+    for field in user.FIELDS:
+        table.add_row(user.LABELS[field], details[field] or "")
+    console.print(table)
+
+
+@user_app.command("edit")
+@handle_errors
+def user_edit(
+    first_name: Annotated[str | None, typer.Option("--first-name")] = None,
+    last_name: Annotated[str | None, typer.Option("--last-name")] = None,
+    address_line_1: Annotated[str | None, typer.Option("--address")] = None,
+    address_line_2: Annotated[str | None, typer.Option("--address-2")] = None,
+    city: Annotated[str | None, typer.Option("--city")] = None,
+    state: Annotated[str | None, typer.Option("--state")] = None,
+    zip_code: Annotated[str | None, typer.Option("--zip")] = None,
+    email: Annotated[str | None, typer.Option("--email")] = None,
+    phone: Annotated[str | None, typer.Option("--phone")] = None,
+    payment_notes: Annotated[
+        str | None,
+        typer.Option("--payment-notes", help="Shown at the bottom of an invoice."),
+    ] = None,
+):
+    """Change one or more of your details."""
+    values = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "address_line_1": address_line_1,
+        "address_line_2": address_line_2,
+        "city": city,
+        "state": state,
+        "zip_code": zip_code,
+        "email": email,
+        "phone": phone,
+        "payment_notes": payment_notes,
+    }
+    if not any(v is not None for v in values.values()):
+        raise TimeTrackerError("Nothing to change. Pass at least one option.")
+
+    with db.connection() as conn:
+        user.save_user(conn, **values)
+    console.print("Details updated.")

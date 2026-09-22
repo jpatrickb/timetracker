@@ -128,6 +128,11 @@ Serves to store the user details. This table holds exactly one row, which is enf
 | City | Str | F |  |  | F |
 | State | Str | F |  |  | F |
 | Zip Code | Str | F |  |  | F |
+| Email | Str | F |  |  | T |
+| Phone | Str | F |  |  | T |
+| Payment Notes | Str | F |  |  | T |
+
+Email, phone, and payment notes are optional. Each is left off the rendered invoice when it's empty.
 
 ## Schema Versioning
 

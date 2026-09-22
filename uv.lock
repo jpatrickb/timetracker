@@ -258,8 +258,10 @@ xlsx = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "openpyxl" },
     { name = "pytest" },
     { name = "time-machine" },
+    { name = "typst" },
 ]
 
 [package.metadata]
@@ -274,8 +276,10 @@ provides-extras = ["pdf", "xlsx"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "time-machine", specifier = ">=3.5.0" },
+    { name = "typst", specifier = ">=0.15.0" },
 ]
 
 [[package]]

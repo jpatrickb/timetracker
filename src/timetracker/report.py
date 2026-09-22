@@ -45,6 +45,10 @@ class Report:
     end: date
     fields: list[str]
     rows: list[dict] = field(default_factory=list)
+    # The matched entries themselves, which invoices link to
+    entry_ids: list[int] = field(default_factory=list)
+    client_ids: list[int] = field(default_factory=list)
+    first_day: date | None = None
     total_seconds: int = 0
     total_cents: int | None = None
     skipped_open: int = 0
@@ -71,6 +75,7 @@ def build_report(
     end: date | None = None,
     group_by: GroupBy = "entry",
     fields: list[str] | None = None,
+    include_billed: bool = True,
 ) -> Report:
     """
     Collects finished entries that start within [start, end] (local dates,
@@ -79,6 +84,9 @@ def build_report(
     With no dates the range is the current week. With only a start, it runs
     to today. With only an end, it has no lower bound. Entries belong to the
     range they start in, even if they run past its end.
+
+    With include_billed False, entries already on an issued invoice are left
+    out, which is what invoice generation uses to avoid double billing.
     """
     if start is None and end is None:
         start, end = current_week()
@@ -89,10 +97,10 @@ def build_report(
         group_by=group_by, start=start, end=end, fields=_check_fields(group_by, fields)
     )
 
-    where, params = _filters(conn, clients, projects, start, end)
+    where, params = _filters(conn, clients, projects, start, end, include_billed)
     entries = conn.execute(
         f"""
-        SELECT e.entry_id, e.start_time, e.end_time, e.duration,
+        SELECT e.entry_id, e.start_time, e.end_time, e.duration, e.client_id,
             c.client_name, p.project_name, e.description,
             e.pay_rate_hourly, e.total_pay
         FROM time_entries AS e
@@ -106,6 +114,12 @@ def build_report(
 
     finished = [e for e in entries if e["end_time"] is not None]
     report.skipped_open = len(entries) - len(finished)
+    report.entry_ids = [e["entry_id"] for e in finished]
+    report.client_ids = list(dict.fromkeys(e["client_id"] for e in finished))
+    if finished:
+        report.first_day = pendulum.from_timestamp(
+            finished[0]["start_time"], tz="local"
+        ).date()
 
     if group_by == "entry":
         report.rows = [_entry_row(e) for e in finished]
@@ -113,7 +127,7 @@ def build_report(
         report.rows = _group(finished, group_by)
 
     report.total_seconds = sum(r["duration"] for r in report.rows)
-    report.total_cents = _sum_cents(r["pay"] for r in report.rows)
+    report.total_cents = sum_cents(r["pay"] for r in report.rows)
     return report
 
 
@@ -148,6 +162,7 @@ def _filters(
     projects: list[str] | None,
     start: date | None,
     end: date,
+    include_billed: bool = True,
 ) -> tuple[str, list]:
     """
     Builds the WHERE clause. Names are matched by name or alias. A name that
@@ -188,6 +203,15 @@ def _filters(
         clauses.append(f"e.project_id IN ({_marks(project_ids)})")
         params.extend(project_ids)
 
+    if not include_billed:
+        clauses.append(
+            """NOT EXISTS (
+                SELECT 1 FROM invoice_entries AS ie
+                JOIN invoices AS i ON i.invoice_id = ie.invoice_id
+                WHERE ie.entry_id = e.entry_id AND i.status = 'issued'
+            )"""
+        )
+
     return " AND ".join(clauses), params
 
 
@@ -204,11 +228,11 @@ def _local_midnight(day: date, days_after: int = 0) -> int:
 # --- Rows ---
 
 
-def _cents(pay: float | None) -> int | None:
+def to_cents(pay: float | None) -> int | None:
     return None if pay is None else round(pay * 100)
 
 
-def _sum_cents(values) -> int | None:
+def sum_cents(values) -> int | None:
     """Sums pay in cents. None (no rate) only if nothing had a rate."""
     known = [v for v in values if v is not None]
     return sum(known) if known else None
@@ -224,7 +248,7 @@ def _entry_row(e: sq.Row) -> dict:
         "description": e["description"],
         "duration": e["duration"],
         "rate": e["pay_rate_hourly"],
-        "pay": _cents(e["total_pay"]),
+        "pay": to_cents(e["total_pay"]),
     }
 
 
@@ -235,12 +259,12 @@ def _group(entries: list[sq.Row], group_by: GroupBy) -> list[dict]:
     """
     groups: dict[date, dict] = {}
     for e in entries:
-        pieces = _split(e["start_time"], e["end_time"], group_by)
-        cents = _cents(e["total_pay"])
+        pieces = split_periods(e["start_time"], e["end_time"], group_by)
+        cents = to_cents(e["total_pay"])
         pay_pieces: list[int | None] = (
             [None] * len(pieces)
             if cents is None
-            else list(_allocate(cents, [secs for _, secs in pieces]))
+            else list(allocate_cents(cents, [secs for _, secs in pieces]))
         )
 
         for (period_start, seconds), pay in zip(pieces, pay_pieces):
@@ -267,7 +291,7 @@ def _group(entries: list[sq.Row], group_by: GroupBy) -> list[dict]:
     rows = [groups[key] for key in sorted(groups)]
     for row in rows:
         row["description"] = DESCRIPTION_SEPARATOR.join(row["description"]) or None
-        row["pay"] = _sum_cents(row["pay"])
+        row["pay"] = sum_cents(row["pay"])
     return rows
 
 
@@ -276,7 +300,7 @@ def _add_unique(items: list, value):
         items.append(value)
 
 
-def _split(start: int, end: int, group_by: GroupBy) -> list[tuple[date, int]]:
+def split_periods(start: int, end: int, group_by: GroupBy) -> list[tuple[date, int]]:
     """
     Breaks [start, end) into (period start date, seconds) pieces at local
     day/week/month boundaries. Working in local time handles 23- and 25-hour
@@ -295,7 +319,7 @@ def _split(start: int, end: int, group_by: GroupBy) -> list[tuple[date, int]]:
         cursor = piece_end
 
 
-def _allocate(total_cents: int, seconds: list[int]) -> list[int]:
+def allocate_cents(total_cents: int, seconds: list[int]) -> list[int]:
     """
     Divides an entry's pay across its pieces in proportion to time, in whole
     cents, so the pieces always add back up to the entry's exact total.
