@@ -1,43 +1,45 @@
 # Project Map
 
-Functionality can be broken up as follows:
+Functionality is broken up by module. Items marked *(planned)* aren't built yet.
 
-- Database operations
-    - initialize database
-    - add time entry
-    - update time entry
-    - get time entry/entries
-- Time logging
-    - clock in
-    - clock out
-    - update time entry
-- Reporting
-    - get data for report
-    - format data
-    - generate invoice (excel or pdf)
-- Client management
-    - Create client
-    - Update client (name, pay rate)
-    - Create alias
-- Project management
-    - Create project
-    - Update project (name, pay rate)
-    - Create alias
-- Invoice Management
-    - Generate invoice
-    - Issue invoice
-    - Void invoice
-    - Delete invoice
+- `db.py`: database operations
+    - resolve the database path (argument, `TIMETRACKER_DB`, config file, default)
+    - connect, creating the directory and applying migrations
+    - `connection()` context manager that always closes
+- `clients.py`: client and project management
+    - resolve a client or project by name or alias
+    - create/edit client (name, pay rate with cascade, aliases)
+    - create/edit project (name, pay rate, aliases)
+    - list clients, list projects
+- `clock.py`: time logging
+    - parse typed times (with DST warnings) and format timestamps/durations
+    - clock in, clock out, add a finished entry
+    - edit (including clearing fields, reopening, refreshing the rate), delete
+    - open entries, overlap detection, invoice-link checks
+- `cli.py`: the `tt` command-line interface over the modules above
+- `errors.py`: `TimeTrackerError`, for user-facing errors shown without a traceback
+- `report.py`: reporting
+    - filter entries by client, project, and date range (skipping open entries)
+    - group by entry/day/week/month, splitting sessions at local period boundaries
+    - divide pay across split pieces in whole cents
+- `formats/`: output formats
+    - `__init__.py`: shared headers, value formatting, total row, default filename
+    - `table.py`: terminal table and Markdown
+    - `delimited.py`: CSV and TSV
+    - `json_format.py`: JSON
+    - `xlsx.py`, `pdf.py`: invoices *(planned)*
+- Invoice management *(planned)*
+    - generate draft, issue, void, delete draft
 
 ## Files
 
 ```
 time-tracker/
 ├── dev
-│   └── dev.db
+│   └── dev.db                 # `make init-db` rebuilds it
 ├── docs
-│   ├── brainstorm.md
-│   ├── docs.md
+│   ├── brainstorm.md          # spec and edge cases
+│   ├── docs.md                # command reference
 │   ├── map.md
 │   └── schema.md
 ├── makefile
@@ -46,18 +48,15 @@ time-tracker/
 ├── src
 │   └── timetracker
 │       ├── __init__.py
-│       ├── __pycache__
-│       │   ├── __init__.cpython-313.pyc
-│       │   ├── cli.cpython-313.pyc
-│       │   └── db.cpython-313.pyc
 │       ├── cli.py
+│       ├── clients.py
 │       ├── clock.py
 │       ├── db.py
+│       ├── errors.py
 │       ├── formats
 │       │   ├── __init__.py
-│       │   ├── __pycache__
-│       │   │   └── table.cpython-313.pyc
 │       │   ├── delimited.py
+│       │   ├── json_format.py
 │       │   ├── pdf.py
 │       │   ├── table.py
 │       │   └── xlsx.py
@@ -65,6 +64,10 @@ time-tracker/
 │       │   └── 001_initial.sql
 │       └── report.py
 ├── tests
+│   ├── test_clients.py
+│   ├── test_clock.py
+│   ├── test_db.py
+│   └── test_report.py
 └── uv.lock
 ```
 

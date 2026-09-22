@@ -55,7 +55,9 @@ def resolve_project(
     if not project_name:
         return None
 
-    query = "SELECT project_id, client_id FROM project_alias WHERE project_alias_text = ?"
+    query = (
+        "SELECT project_id, client_id FROM project_alias WHERE project_alias_text = ?"
+    )
     params: tuple = (project_name,)
     if client_id is not None:
         query += " AND client_id = ?"
