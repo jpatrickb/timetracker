@@ -110,7 +110,7 @@ tt user edit [--first-name X] [--last-name X] [--address X] [--address-2 X]
 
 Name, street address, city, state and ZIP are required for invoices. Address line 2, email, phone and payment notes are optional, and blank ones are left off the invoice.
 
-PDF output needs `uv sync --extra pdf` (Typst) and Excel needs `uv sync --extra xlsx` (openpyxl).
+PDF output uses Typst and Excel uses openpyxl. Both install with the app.
 
 ## Configuration
 
