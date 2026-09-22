@@ -8,3 +8,13 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Database files
+*.db
+*.db-wal
+*.db-shm
+dev/
+.pytest_cache/
+
+# Local sqls LSP connection config (absolute paths, machine-specific)
+.sqls/

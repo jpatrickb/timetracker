@@ -7,18 +7,17 @@ Allows for a many to one relationship with Clients and with Projects.
 
 Timestamps are stored as UTC Unix epoch seconds. We don't store any local time. Instead, the local calendar date is derived at read time from the timezone the machine reports when the command runs.
 
-| Column Name | Data Type | PK | Unique | Check | Nullable |
-|---|---|---|---|---|---|
-| ID | int | True | True |  | False |
-| Start Time | int (UTC epoch seconds) | |  | start_time <= current_time | False |
-| End time | int (UTC epoch seconds) | | | start_time <= end_time | True |
-| Duration | int (seconds, generated column) | | | duration = end_time - start_time | True |
-| Client ID | int (FK → Clients.Client ID) | | | | True |
-| Project ID | int (FK → Projects.Project ID) | | | | True |
-| Description | str | | | | True |
-| Pay Rate Hourly | float | F | F |  | True |
-| Total Pay | float | F | F | pay rate * (duration / 3600), rounded to cents | True |
-| invoice_id | int (FK) | | | | True |
+| Column Name | Data Type | PK | Unique | Check | Nullable | Constraint |
+|---|---|---|---|---|---|---|
+| ID | int | True | True |  | False | Column (unique) |
+| Start Time | int (UTC epoch seconds) | |  | start_time <= current_time | False | Application code (requires checking current time) |
+| End time | int (UTC epoch seconds) | | | start_time <= end_time | True | Table (requires checking other column on update) |
+| Duration | int (seconds, generated column) | | | duration = end_time - start_time | True | Table (requires calculating/comparing against two values on update) |
+| Client ID | int (FK → Clients.Client ID) | | | | True |  |
+| Project ID | int (FK → Projects.Project ID) | | | | True | Same as client ID |
+| Description | str | | | | True | None |
+| Pay Rate Hourly | float | F | F |  | True | Column (checking float, and >=0) |
+| Total Pay | float | F | F | pay rate * (duration / 3600), rounded to cents | True | Table (checking against pay rate and duration) |
 
 Entries carry no billing column. Billing status is derived, so an entry is billed when it is linked through the invoice entries to an invoice that has the status of `issued`.
 
@@ -26,24 +25,42 @@ Entries carry no billing column. Billing status is derived, so an entry is bille
 
 Serves to store the list of unique clients.
 
-| Column Name | Data Type | PK | Unique | Check | Nullable |
-|---|---|---|---|---|---|
-| Client ID | int | True | True |  | False |
-| Client Name | Str | False | True |  | False |
-| Alias | str | False | True |  | True |
-| Pay rate hourly | float | False | False |  | True |
+| Column Name | Data Type | PK | Unique | Check | Nullable | Constraint |
+|---|---|---|---|---|---|---|
+| Client ID | int | True | True |  | False | Column level uniqueness |
+| Client Name | Str | False | True |  | False | Column level uniqueness |
+| Pay rate hourly | float | False | False |  | True | None |
 
 ## Projects
 
 Serves to store the list of projects.
 
-| Column Name | Data Type | PK | Unique | Check | Nullable |
-|---|---|---|---|---|---|
-| Project ID | int | True | True |  | False |
-| Project Name | str | False | False (but client,project naming pair should be unique) |  | False |
-| Alias | str | False | True |  | True |
+| Column Name | Data Type | PK | Unique | Check | Nullable | Constraint |
+|---|---|---|---|---|---|---|
+| Project ID | int | True | True |  | False | Column level uniqueness |
+| Project Name | str | False | False (but client,project naming pair should be unique) |  | False | Table, client_id and project name should be unique, referencing other columns |
 | Client ID | int (FK → Clients.Client ID) |  |  |  | False |
 | Pay rate hourly | float | False | False |  | True |
+
+## Client Alias
+
+This table stores client aliases so that we can refer to a specific client using various different names. When a new client is created, the actual name of the client is inserted into this table as the first alias so that when we are searching for companies by names, we only need to check this table and don't need to check the client table as well.
+
+| Column Name | Data Type | PK | Unique | Check | Nullable |
+|---|---|---|---|---|---|
+| Client alias ID | int | T | T |  | F |
+| Client Alias text | str | F | T |  | F |
+| Client ID (FK) | int | F | F |  | F |
+
+## Project Alias
+
+This table stores project aliases so that we can refer to a specific project using various different names. When a new project is created, the actual name of the project is inserted into this table as the first alias so that when we are searching for projects by names, we only need to check this table and don't need to check the project table as well.
+
+| Column Name | Data Type | PK | Unique | Check | Nullable |
+|---|---|---|---|---|---|
+| Project alias ID | int | T | T |  | F |
+| Project Alias text | str | F | T |  | F |
+| Project ID (FK) | int | F | F |  | F |
 
 ## Invoices
 
@@ -91,7 +108,8 @@ Serves to store the user details. This table holds exactly one row, which is enf
 
 ## Schema Versioning
 
-The database stores its schema version in SQLite's built-in `user_version` pragma, which costs nothing and needs no table of its own. Migrations are an ordered list of steps, where step N moves the database from version N-1 to version N. On open, the application compares the file's version against the version it expects and applies any missing steps in a single transaction before running the command.
+The database stores its schema version in SQLite's built-in `user_version` pragma, which costs nothing and needs no table of its own. Migrations are an ordered list of steps, where step N moves the database from version N-1 to version N. On open, the application compares the file's version against the version it expects and applies any missing steps in several transactions before running the command.
 
 This matters because the database accumulates real billable hours quickly, so a schema change made after the first invoice can't be handled by deleting the file and starting over. Version 1 is the schema described in this document.
 
+Migrations are handled using numbered `.sql` files in the `src/timetracker/migrations/` directory, applied in filename order. Applied migrations can never be edited, and any changes to the schema should go in a new numbered file.

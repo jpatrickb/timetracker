@@ -124,13 +124,17 @@ as billed:
 
 ## Client and Project Creation
 
-Since there are likely multiple clients, and potentially multiple projects per client, we should be able to manage the clients and the projects. These primarily have names, though each client and potentially project can have a billable rate as well. Rate can be set to null, and it should default to inheriting from client, with the option to manually change per project.
+Since there are likely multiple clients, and potentially multiple projects per client, we should be able to manage the clients and the projects. These primarily have names, though each client and potentially project can have a billable rate as well. When a new project is created, the client's rate is automatically copied over unless a project override is explicitly given. Changing a client's rate cascades to projects still holding the old value.
 
 Because commands accept a client by name or by alias in the same argument position, an alias has to be unique against client names as well as against other aliases. Otherwise an alias like `G8` could refer both to an abbreviation of G8 Capital and to a different client actually named G8, and the command would have no way to tell which was meant. The same rule applies to project aliases within a client. Creating an alias that collides should throw an error rather than resolve to a guess.
+
+Having one or more aliases begs for another table where many aliases join to one foreign client id.
 
 ### Create new Client
 
 Accepts client name as a string as the first argument without flags, adds optional flags.
+
+When a new client is created, the client details are all added to the client table, and then the initial client name that's passed in is also added to the client alias table so that we can search for the client ID from the alias table using any alias including the original name.
 
 Flags:
 - Alias `--client-alias TFA`
@@ -138,21 +142,29 @@ Flags:
 
 ### Edit Client
 
-Should always pass in client name/ID/alias as the first argument without flags.
+Should always pass in client name/ID/alias as the first argument without flags. When a new pay rate is given, it cascades to all projects that currently have the same pay rate as the client. Projects that have a different pay rate will be left alone.
 
 Flags:
 - client ID (alternative to name) `--id 123`
 - New name `--new-client "G8 Capital"`
 - New rate `--pay-rate-hourly 40`
-- New alis `--alias G8`
+- New alias `--alias G8`
 
 ### Create new project
 
 Should always pass in client name/ID/alias as the first argument without flags, and second argument as project name without flags, adds optional flags.
+
+When a new project is created, the project details are all added to the project table, and then the initial project name that's passed in is also added to the project alias table so that we can search for the project ID from the alias table using any alias including the original name.
+
+If no pay rate is given, then the pay rate defaults to that of the client, and then the project received inherited pay rate updates as the client receives them. If a different pay rate is passed (even if it is `None`, meaning no pay rate) then that will be set as the project pay rate. A project whose pay rate differs from teh client's old rate will be left alone when the client rate updates.
 
 Flags:
 - Pay rate for the project `--pay-rate-hourly 45`
 
 ## Package and DB management
 
-The package will be developed locally in this repository, though the working directory for the application should be something like ~/TimeTracker/ unless a user manually overrides that during setup. This will house the database and set environment variables that will be used for database access.
+The database will live at `~/TimeTracker/timetracker.db` by default, but the user can choose a different location during setup. The choice will be stored in a config file under `~/.config/timetracker` instead of an environment variable.
+
+The path resolves according to this preference: an explicit argument passed in code, then the `TIMETRACKER_DB` environment variable, then the configured location, then the default. Tests pass an explicit path so they don't use the real data.
+
+The directory will be created the first time it's used rather than at install time. The setup command will also create it, but any command that opens the database will create it if it's not there.
