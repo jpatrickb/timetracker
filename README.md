@@ -47,6 +47,12 @@ tt status
 tt out --id 1
 ```
 
+Tab completion is worth turning on; it completes your client names, projects, open entries and draft invoices, not just flags:
+
+```
+tt --install-completion
+```
+
 Full command reference: [docs/docs.md](docs/docs.md).
 
 ## Documentation

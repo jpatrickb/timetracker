@@ -15,7 +15,7 @@ from rich.table import Table
 
 from pathlib import Path
 
-from timetracker import clients, clock, db, invoice, report, tui, user
+from timetracker import clients, clock, completion, db, invoice, report, tui, user
 from timetracker.formats import default_filename
 from timetracker.formats.delimited import render_csv, render_tsv
 from timetracker.formats.json_format import render_json
@@ -62,10 +62,19 @@ Aliases = Annotated[
     list[str] | None,
     typer.Option("--alias", help="Alternate name. Repeat for several."),
 ]
-Client = Annotated[str | None, typer.Option("--client", help="Client name or alias.")]
+Client = Annotated[
+    str | None,
+    typer.Option(
+        "--client", help="Client name or alias.", autocompletion=completion.clients
+    ),
+]
 Project = Annotated[
     str | None,
-    typer.Option("--project", help="Project name or alias. Implies its client."),
+    typer.Option(
+        "--project",
+        help="Project name or alias. Implies its client.",
+        autocompletion=completion.projects,
+    ),
 ]
 TIME_FORMAT = "HH:MM[:SS], optionally after YYYY-MM-DD"
 TIME_HELP = f"{TIME_FORMAT}. Defaults to now."
@@ -96,7 +105,12 @@ def client_add(
 @handle_errors
 def client_edit(
     name: Annotated[
-        str | None, typer.Argument(help="Client name or alias.", show_default=False)
+        str | None,
+        typer.Argument(
+            help="Client name or alias.",
+            show_default=False,
+            autocompletion=completion.clients,
+        ),
     ] = None,
     client_id: Annotated[
         int | None, typer.Option("--id", help="Client ID, instead of a name.")
@@ -159,7 +173,10 @@ def _client_id(conn, name: str | None, client_id: int | None) -> int:
 @project_app.command("add")
 @handle_errors
 def project_add(
-    client: Annotated[str, typer.Argument(help="Client name or alias.")],
+    client: Annotated[
+        str,
+        typer.Argument(help="Client name or alias.", autocompletion=completion.clients),
+    ],
     name: Annotated[str, typer.Argument(help="Project name.")],
     pay_rate: PayRate = None,
     no_pay_rate: Annotated[
@@ -184,8 +201,16 @@ def project_add(
 @project_app.command("edit")
 @handle_errors
 def project_edit(
-    client: Annotated[str, typer.Argument(help="Client name or alias.")],
-    project: Annotated[str, typer.Argument(help="Project name or alias.")],
+    client: Annotated[
+        str,
+        typer.Argument(help="Client name or alias.", autocompletion=completion.clients),
+    ],
+    project: Annotated[
+        str,
+        typer.Argument(
+            help="Project name or alias.", autocompletion=completion.projects
+        ),
+    ],
     new_name: Annotated[
         str | None, typer.Option("--new-project", help="Rename the project.")
     ] = None,
@@ -210,7 +235,11 @@ def project_edit(
 def project_list(
     client: Annotated[
         str | None,
-        typer.Argument(help="Only show this client's projects.", show_default=False),
+        typer.Argument(
+            help="Only show this client's projects.",
+            show_default=False,
+            autocompletion=completion.clients,
+        ),
     ] = None,
 ):
     """List projects, optionally for one client."""
@@ -367,7 +396,12 @@ def _print_clocked_out(entry: sq.Row):
 @handle_errors
 def clock_out(
     entry_id: Annotated[
-        int | None, typer.Option("--id", help="Entry to clock out of.")
+        int | None,
+        typer.Option(
+            "--id",
+            help="Entry to clock out of.",
+            autocompletion=completion.open_entries,
+        ),
     ] = None,
     time: Annotated[str | None, typer.Option("--time", help=TIME_HELP)] = None,
     client: Client = None,
@@ -397,7 +431,12 @@ def clock_out(
 @handle_errors
 def watch(
     entry_id: Annotated[
-        int | None, typer.Option("--id", help="Which open entry to attach to.")
+        int | None,
+        typer.Option(
+            "--id",
+            help="Which open entry to attach to.",
+            autocompletion=completion.open_entries,
+        ),
     ] = None,
 ):
     """Attach the live view to an entry you're already clocked in to."""
@@ -449,7 +488,9 @@ def add(
 @app.command("edit")
 @handle_errors
 def edit(
-    entry_id: Annotated[int, typer.Argument(help="Entry to edit.")],
+    entry_id: Annotated[
+        int, typer.Argument(help="Entry to edit.", autocompletion=completion.entries)
+    ],
     start_time: Annotated[
         str | None, typer.Option("--start-time", help=TIME_FORMAT)
     ] = None,
@@ -504,7 +545,9 @@ def edit(
 @app.command("delete")
 @handle_errors
 def delete(
-    entry_id: Annotated[int, typer.Argument(help="Entry to delete.")],
+    entry_id: Annotated[
+        int, typer.Argument(help="Entry to delete.", autocompletion=completion.entries)
+    ],
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Skip the confirmation.")
     ] = False,
@@ -569,11 +612,19 @@ OUTPUTS = ("table", *TEXT_OUTPUTS, *FILE_OUTPUTS)
 def report_command(
     client: Annotated[
         list[str] | None,
-        typer.Option("--client", help="Only this client. Repeat for several."),
+        typer.Option(
+            "--client",
+            help="Only this client. Repeat for several.",
+            autocompletion=completion.clients,
+        ),
     ] = None,
     project: Annotated[
         list[str] | None,
-        typer.Option("--project", help="Only this project. Repeat for several."),
+        typer.Option(
+            "--project",
+            help="Only this project. Repeat for several.",
+            autocompletion=completion.projects,
+        ),
     ] = None,
     start: Annotated[
         str | None, typer.Option("--start", help="First day, YYYY-MM-DD.")
@@ -582,15 +633,28 @@ def report_command(
         str | None, typer.Option("--end", help="Last day (inclusive), YYYY-MM-DD.")
     ] = None,
     group_by: Annotated[
-        str, typer.Option("--group-by", help="entry, day, week, or month.")
+        str,
+        typer.Option(
+            "--group-by",
+            help="entry, day, week, or month.",
+            autocompletion=lambda: list(report.GROUP_BY_OPTIONS),
+        ),
     ] = "entry",
     fields: Annotated[
         str | None,
-        typer.Option("--fields", help="Comma-separated columns, e.g. id,project,pay."),
+        typer.Option(
+            "--fields",
+            help="Comma-separated columns, e.g. id,project,pay.",
+            autocompletion=completion.report_fields,
+        ),
     ] = None,
     output: Annotated[
         str,
-        typer.Option("--output", help="table, md, json, csv, tsv, pdf, or xlsx."),
+        typer.Option(
+            "--output",
+            help="table, md, json, csv, tsv, pdf, or xlsx.",
+            autocompletion=lambda: list(OUTPUTS),
+        ),
     ] = "table",
     write: Annotated[
         bool, typer.Option("--write", help="Save to the reports folder.")
@@ -811,8 +875,20 @@ def invoice_list():
 @invoice_app.command("issue")
 @handle_errors
 def invoice_issue(
-    invoice_id: Annotated[int, typer.Argument(help="Draft to issue.")],
-    output: Annotated[str, typer.Option("--output", help="pdf or xlsx.")] = "pdf",
+    invoice_id: Annotated[
+        int,
+        typer.Argument(
+            help="Draft to issue.", autocompletion=completion.draft_invoices
+        ),
+    ],
+    output: Annotated[
+        str,
+        typer.Option(
+            "--output",
+            help="pdf or xlsx.",
+            autocompletion=lambda: list(INVOICE_OUTPUTS),
+        ),
+    ] = "pdf",
 ):
     """
     Issue a draft: allocate its number, mark its entries billed, and write
@@ -828,7 +904,12 @@ def invoice_issue(
 @invoice_app.command("void")
 @handle_errors
 def invoice_void(
-    invoice_id: Annotated[int, typer.Argument(help="Issued invoice to void.")],
+    invoice_id: Annotated[
+        int,
+        typer.Argument(
+            help="Issued invoice to void.", autocompletion=completion.issued_invoices
+        ),
+    ],
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Skip the confirmation.")
     ] = False,
@@ -844,7 +925,12 @@ def invoice_void(
 @invoice_app.command("delete")
 @handle_errors
 def invoice_delete(
-    invoice_id: Annotated[int, typer.Argument(help="Draft to delete.")],
+    invoice_id: Annotated[
+        int,
+        typer.Argument(
+            help="Draft to delete.", autocompletion=completion.draft_invoices
+        ),
+    ],
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Skip the confirmation.")
     ] = False,
@@ -860,8 +946,20 @@ def invoice_delete(
 @invoice_app.command("regenerate")
 @handle_errors
 def invoice_regenerate(
-    invoice_id: Annotated[int, typer.Argument(help="Invoice to write again.")],
-    output: Annotated[str, typer.Option("--output", help="pdf or xlsx.")] = "pdf",
+    invoice_id: Annotated[
+        int,
+        typer.Argument(
+            help="Invoice to write again.", autocompletion=completion.any_invoices
+        ),
+    ],
+    output: Annotated[
+        str,
+        typer.Option(
+            "--output",
+            help="pdf or xlsx.",
+            autocompletion=lambda: list(INVOICE_OUTPUTS),
+        ),
+    ] = "pdf",
 ):
     """
     Write an invoice's file again from its linked entries, so it matches the

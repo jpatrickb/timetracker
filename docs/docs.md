@@ -112,6 +112,27 @@ Name, street address, city, state and ZIP are required for invoices. Address lin
 
 PDF output uses Typst and Excel uses openpyxl. Both install with the app.
 
+## Tab completion
+
+```
+tt --install-completion      # once, then restart your shell
+```
+
+Beyond commands and flags, Tab completes values from your database:
+
+| Where | Suggests |
+| --- | --- |
+| `--client`, and the client argument | Client names and aliases, with the full name as help |
+| `--project`, and the project argument | Projects, narrowed to the client you already typed |
+| `tt out --id`, `tt watch --id` | Open entries, with their client/project and start time |
+| `tt edit`, `tt delete` | The 25 most recent entries, newest first |
+| `tt invoice issue`/`delete` | Drafts only |
+| `tt invoice void` | Issued invoices only |
+| `--group-by`, `--output` | The valid choices |
+| `--fields` | One column at a time, skipping ones you've already listed |
+
+Completions open the database read-only, and return nothing rather than an error if it's missing or busy, so pressing Tab can never change your data.
+
 ## Configuration
 
 The database location is chosen in this order:
