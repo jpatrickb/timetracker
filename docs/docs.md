@@ -53,7 +53,15 @@ tt status
 
 **Overlaps.** Overlapping entries are allowed, with a warning, including clocking in while already clocked in. An open entry counts as running indefinitely. Back-to-back entries don't overlap.
 
-**`--watch`.** Shows a running timer. Enter clocks out and asks for an optional description to append. Ctrl+C leaves the entry running.
+**`--watch` and `tt watch`.** `tt in --watch` opens a full-screen view over the entry; `tt watch [--id N]` re-attaches to an entry you're already clocked in to. Five panels: details, a wall clock, elapsed time and money earned, the description editor, and today's entries.
+
+| Key | Does |
+| --- | --- |
+| `tab` | Move between panels |
+| `enter` (in a detail field) | Apply the client, project and start time |
+| `ctrl+s` | Save the description (it also autosaves every 15s) |
+| `ctrl+d` | Detach, leaving the entry running |
+| `ctrl+o` | Clock out |
 
 **Invoices.** Entries on an issued invoice can't be edited or deleted until that invoice is voided. Entries on any invoice, draft included, can't be reopened.
 
