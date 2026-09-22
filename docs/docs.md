@@ -74,6 +74,36 @@ tt report [--client C]... [--project P]... [--start YYYY-MM-DD] [--end YYYY-MM-D
 - **Output.** `table` prints to the terminal. `md`, `json`, `csv`, and `tsv` print plain text you can pipe, or save with `--write` to `reports/` next to the database. `--filename` picks the name, and a name with a folder in it is saved there instead. JSON gives times in ISO 8601 with the UTC offset, durations in seconds, and pay in dollars.
 - **Open entries** are left out, with a warning saying how many.
 
+## Invoices
+
+```
+tt report --invoice [--client C] [--start D] [--end D] [--include-billed] [--output pdf|xlsx]
+tt invoice list
+tt invoice issue N [--output pdf|xlsx]
+tt invoice void N [--yes]
+tt invoice delete N [--yes]
+tt invoice regenerate N [--output pdf|xlsx]
+```
+
+- **Creating one.** `tt report --invoice` makes a *draft* from the same filters a report uses, and writes the file to `invoices/` next to the database. The selection must be one client. Entries on an issued invoice are left out unless `--include-billed` is given, and open entries are always left out.
+- **Rows.** One row per project per day, with Date, Project, Hours (`[h]:mm:ss`), Amount and Description, then a Total. A session crossing midnight is split, with its pay divided in proportion.
+- **Numbers.** Each client has its own sequence. A draft shows the number it *would* get; the number is only recorded when you issue it. Voided invoices keep their number, so the sequence never repeats or skips.
+- **Issuing** marks the entries as billed, which is what keeps them off later invoices, and writes the file again with the confirmed number. Billed entries can't be edited or deleted until the invoice is voided.
+- **Regenerating** rebuilds from the invoice's linked entries, so it always matches what was sent, even if later entries would have matched the original filters.
+
+## Your details
+
+```
+tt setup                  # database location, then name, address, and optional contact info
+tt user show
+tt user edit [--first-name X] [--last-name X] [--address X] [--address-2 X]
+             [--city X] [--state X] [--zip X] [--email X] [--phone X] [--payment-notes X]
+```
+
+Name, street address, city, state and ZIP are required for invoices. Address line 2, email, phone and payment notes are optional, and blank ones are left off the invoice.
+
+PDF output needs `uv sync --extra pdf` (Typst) and Excel needs `uv sync --extra xlsx` (openpyxl).
+
 ## Configuration
 
 The database location is chosen in this order:

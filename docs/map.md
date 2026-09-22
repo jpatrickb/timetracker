@@ -16,6 +16,12 @@ Functionality is broken up by module. Items marked *(planned)* aren't built yet.
     - clock in, clock out, add a finished entry
     - edit (including clearing fields, reopening, refreshing the rate), delete
     - open entries, overlap detection, invoice-link checks
+- `user.py`: the single user row behind the invoice sender block
+- `invoice.py`: invoice lifecycle
+    - create a draft and link its entries
+    - issue (allocating the client's next number), void, delete a draft
+    - build the document a renderer needs: one row per project per day
+    - invoice file names
 - `cli.py`: the `tt` command-line interface over the modules above
 - `errors.py`: `TimeTrackerError`, for user-facing errors shown without a traceback
 - `report.py`: reporting
@@ -27,7 +33,8 @@ Functionality is broken up by module. Items marked *(planned)* aren't built yet.
     - `table.py`: terminal table and Markdown
     - `delimited.py`: CSV and TSV
     - `json_format.py`: JSON
-    - `xlsx.py`, `pdf.py`: invoices *(planned)*
+    - `xlsx.py`: invoice as an Excel workbook (openpyxl)
+    - `pdf.py`: invoice as a PDF, typeset with Typst
 - Invoice management *(planned)*
     - generate draft, issue, void, delete draft
 
@@ -39,6 +46,7 @@ time-tracker/
 │   └── dev.db                 # `make init-db` rebuilds it
 ├── docs
 │   ├── brainstorm.md          # spec and edge cases
+│   ├── invoice-example/       # the spreadsheet the invoice layout follows
 │   ├── docs.md                # command reference
 │   ├── map.md
 │   └── schema.md
@@ -53,6 +61,8 @@ time-tracker/
 │       ├── clock.py
 │       ├── db.py
 │       ├── errors.py
+│       ├── invoice.py
+│       ├── user.py
 │       ├── formats
 │       │   ├── __init__.py
 │       │   ├── delimited.py
@@ -67,6 +77,7 @@ time-tracker/
 │   ├── test_clients.py
 │   ├── test_clock.py
 │   ├── test_db.py
+│   ├── test_invoice.py
 │   └── test_report.py
 └── uv.lock
 ```
@@ -80,4 +91,8 @@ TimeTracker/
 ├── timetracker.db
 ├── invoices/
 │   ├── techforce-advisors-2026-09-01-2026-09-14-hourly-invoice-patrick-beal-no-12.pdf
+├── reports/
+│   ├── report-2026-09-21-to-2026-09-27-by-day.csv
 ```
+
+The database location comes from `~/.config/timetracker/config.toml` (set by `tt setup`), and the `invoices/` and `reports/` folders sit next to whichever database is in use.

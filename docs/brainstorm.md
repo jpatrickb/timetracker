@@ -106,7 +106,7 @@ A session that crosses a period boundary (midnight for days) is split into piece
 
 Open entries (still clocked in) are left out of reports and invoices, since they have no end time or pay yet. The report says how many were skipped, e.g. "1 open entry not included". The database also refuses to link an open entry to an invoice.
 
-One note on the PDF/Excel specifically: The user may want to create a full invoice from this, complete with address, invoice numbers, title, formatting, and more. We'll need to create a table in the database to store some of these information, and have onboarding and update steps to input the information initially or update it later. 
+One note on the PDF/Excel specifically: The user may want to create a full invoice from this, complete with address, invoice numbers, title, formatting, and more. The User table stores this. `tt setup` asks for it (and for where the database lives), `tt user show` displays it, and `tt user edit --city Orem` changes one field. Name, street address, city, state, and ZIP are required. Address line 2, email, phone, and payment notes are optional and are left off the invoice when blank. 
 The invoice layout follows the template in `docs/invoice-example/`: an "HOURLY INVOICE" title with the billing period, the invoice number at the top right, the user's name and address as the sender, and the client's name (no client address is stored). Line items are one row per project per day, for days with work only, with Date, Project, Hours, Amount, and Description columns, then a Total row. Each row's amount uses that project's rate, since projects on one invoice can have different rates. The billing period is stored on the invoice so a regenerated invoice shows the same title even when the first or last days had no work.
 
 Invoices generated should display times as `4:53:12` rather than `4.89` even though `4.89` is what should be used in pay calculations. Time should be measured in seconds, not rounded to minutes. In the past I used a spreadsheet that had a column for `4:53:12` and then a conversion column that turned it into `4.89` to do the math, but this is unnecessary--no rounding to decimals required, we can convert `4:53:12` raw into a float and calculate dollar amounts, rounded to cents, after that.
@@ -150,10 +150,15 @@ Generating a draft is part of report generation via `--invoice`, but the rest of
 invoice lifecycle needs its own commands, since issuing is what actually marks entries
 as billed:
 
-- List invoices `tt invoice list` — shows ID, number (or the predicted one if still a draft), client, status, and total. This is how you find the ID to issue.
+A draft is created with `tt report --invoice`, using the same filters as any report. The selection has to resolve to one client, and entries already on an issued invoice are left out unless `--include-billed` is passed. The file is written as PDF by default, or `--output xlsx` for the spreadsheet. If the file can't be written, the draft is removed again rather than left behind.
+
+- List invoices `tt invoice list` — shows ID, number (or the predicted one if still a draft), client, period, status, hours, and total. This is how you find the ID to issue.
 - Issue a draft `tt invoice issue <invoice id>` — allocates the client's next invoice number, sets status to issued, and regenerates the file with the confirmed number.
 - Void an issued invoice `tt invoice void <invoice id>` — sets status to void, which releases its entries to be billed again while the invoice keeps its number so the client's sequence stays gapless.
 - Delete a draft `tt invoice delete <invoice id>` — only permitted while status is draft, since drafts hold no number and bill nothing.
+- Write the file again `tt invoice regenerate <invoice id> [--output pdf|xlsx]` — rebuilds from the invoice's linked entries, not the original filters.
+
+Void and delete ask for confirmation, and `--yes` skips it.
 
 ### Edge Cases
 

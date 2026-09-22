@@ -161,7 +161,7 @@ def test_split_uses_real_hours_on_dst_day():
     with pendulum.test_local_timezone(pendulum.timezone("America/New_York")):
         start = pendulum.datetime(2026, 11, 1, 0, 0, tz="America/New_York")
         end = pendulum.datetime(2026, 11, 2, 1, 0, tz="America/New_York")
-        pieces = report._split(start.int_timestamp, end.int_timestamp, "day")
+        pieces = report.split_periods(start.int_timestamp, end.int_timestamp, "day")
     # Nov 1 has 25 hours when clocks fall back
     assert pieces == [(date(2026, 11, 1), 25 * 3600), (date(2026, 11, 2), 3600)]
 
@@ -171,7 +171,7 @@ def test_split_uses_real_hours_on_dst_day():
     [(100, [1, 1, 1]), (11543, [7200, 4673]), (1, [5, 5]), (0, [10, 20]), (99, [0])],
 )
 def test_allocate_always_sums_to_total(total, seconds):
-    shares = report._allocate(total, seconds)
+    shares = report.allocate_cents(total, seconds)
     assert sum(shares) == total
     assert len(shares) == len(seconds)
 
