@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS time_entries (
   project_id INTEGER REFERENCES projects(project_id),
   description TEXT,
   pay_rate_hourly FLOAT CHECK (pay_rate_hourly >= 0.0),
-  total_pay FLOAT GENERATED ALWAYS AS (ROUND(pay_rate_hourly * duration / 3600, 2)) STORED
+  total_pay FLOAT GENERATED ALWAYS AS (ROUND(pay_rate_hourly * duration / 3600, 2)) STORED,
+  -- When both are set, the project must belong to the client
+  FOREIGN KEY (project_id, client_id) REFERENCES projects(project_id, client_id)
 );
 
 CREATE TABLE IF NOT EXISTS clients (
@@ -48,7 +50,11 @@ CREATE TABLE IF NOT EXISTS invoices (
   invoice_number INTEGER,
   client_id INTEGER NOT NULL REFERENCES clients(client_id),
   date_generated INTEGER NOT NULL,
+  -- Billing period as local calendar dates (YYYY-MM-DD), not UTC timestamps
+  period_start TEXT NOT NULL CHECK (period_start = date(period_start)),
+  period_end TEXT NOT NULL CHECK (period_end = date(period_end)),
   status TEXT NOT NULL CHECK (status in ('draft', 'issued', 'void')),
+  CONSTRAINT period_in_order CHECK (period_start <= period_end),
   CONSTRAINT unique_client_invoice UNIQUE (client_id, invoice_number),
   -- Drafts have no number, issued and void invoices always do
   CONSTRAINT number_matches_status CHECK ((status = 'draft') = (invoice_number IS NULL))
@@ -108,4 +114,23 @@ BEGIN
   SELECT RAISE(ABORT, 'entry belongs to a different client than the invoice')
   WHERE (SELECT client_id FROM invoices WHERE invoice_id = NEW.invoice_id)
     IS NOT (SELECT client_id FROM time_entries WHERE entry_id = NEW.entry_id);
+END;
+
+-- Only finished entries can go on an invoice, since an open one has no pay yet
+CREATE TRIGGER IF NOT EXISTS trg_invoice_entries_closed_only
+BEFORE INSERT ON invoice_entries
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'open entries cannot be added to an invoice')
+  WHERE (SELECT end_time FROM time_entries WHERE entry_id = NEW.entry_id) IS NULL;
+END;
+
+-- ...and an entry on any invoice can't be reopened afterwards
+CREATE TRIGGER IF NOT EXISTS trg_invoiced_entries_stay_closed
+BEFORE UPDATE OF end_time ON time_entries
+FOR EACH ROW
+WHEN NEW.end_time IS NULL AND OLD.end_time IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'entries on an invoice cannot be reopened')
+  WHERE EXISTS (SELECT 1 FROM invoice_entries WHERE entry_id = NEW.entry_id);
 END;

@@ -11,9 +11,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from pendulum import DateTime
-
-from timetracker.clients import resolve_client, resolve_project
 
 DEFAULT_DB_PATH = Path("~/TimeTracker/timetracker.db")
 CONFIG_PATH = Path("~/.config/timetracker/config.toml")
@@ -67,7 +64,9 @@ def migrate(conn: sq.Connection, migrations_dir: Path = MIGRATIONS_DIR):
 
         # executescript commits any open transaction before it runs, so the
         # BEGIN/COMMIT have to live inside the script itself
-        script = f"BEGIN;\n{mig.read_text()}\nPRAGMA user_version = {mig_version};\nCOMMIT;"
+        script = (
+            f"BEGIN;\n{mig.read_text()}\nPRAGMA user_version = {mig_version};\nCOMMIT;"
+        )
         try:
             conn.executescript(script)
         except sq.Error:
@@ -108,99 +107,3 @@ def connection(db_path: str | Path | None = None) -> Iterator[sq.Connection]:
         yield conn
     finally:
         conn.close()
-
-
-def get_pay_rate(conn: sq.Connection, client_id: int | None, project_id: int | None):
-    cursor = conn.cursor()
-
-    # Default pay rate is Null
-    pay_rate = None
-
-    # Check clients and projects table for pay rates--projects table supercedes, if it exists
-    if project_id:
-        cursor.execute(
-            "SELECT pay_rate_hourly FROM projects WHERE project_id = ?", (project_id,)
-        )
-        pay_rate = cursor.fetchone()["pay_rate_hourly"]
-
-    elif client_id:
-        cursor.execute(
-            "SELECT pay_rate_hourly FROM clients WHERE client_id = ?", (client_id,)
-        )
-        pay_rate = cursor.fetchone()["pay_rate_hourly"]
-
-    return pay_rate
-
-
-def start_entry(
-    conn: sq.Connection,
-    start_time: DateTime,
-    end_time: DateTime | None = None,
-    client: str | None = None,
-    project: str | None = None,
-    description: str | None = None,
-):
-    cursor = conn.cursor()
-
-    # Get client and project id
-    client_id = resolve_client(conn, client)
-    project_id = resolve_project(conn, project, client_id)
-
-    # Get pay rate
-    pay_rate = get_pay_rate(conn, client_id, project_id)
-
-    # Insert into database
-    cursor.execute(
-        """INSERT INTO time_entries 
-            (start_time, end_time, client_id, project_id, description, pay_rate_hourly)
-        VALUES (:start_time, :end_time, :client_id, :project_id, :description, :pay_rate_hourly)""",
-        {
-            "start_time": start_time.int_timestamp,
-            "end_time": end_time.int_timestamp if end_time else None,
-            "client_id": client_id,
-            "project_id": project_id,
-            "description": description,
-            "pay_rate_hourly": pay_rate,
-        },
-    )
-
-    # Get entry id
-    entry_id = cursor.lastrowid
-
-    return entry_id
-
-
-def end_entry(
-    conn: sq.Connection,
-    entry_id: int,  # needed so that we can close the right time entry
-    end_time: DateTime,
-    start_time: DateTime | None = None,
-    client: str | None = None,
-    project: str | None = None,
-    description: str | None = None,
-):
-    cursor = conn.cursor()
-
-    # Get start_time, client, project, and description so we can check for changes and handle overwrites intentionally
-    cursor.execute("""
-        SELECT (start_time, client, project, description)
-        FROM time_entries
-        WHERE (entry_id = :entry_id)
-    """)
-
-    # Check for overwrites and handle (appending description, overwriting client and project)
-
-
-def get_open_entries(conn: sq.Connection):
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """SELECT (entry_id, start_time, client_id, project_id, description) 
-        from time_entries 
-        WHERE end_time IS NULL 
-        ORDER BY start_time ASC;"""
-    )
-
-    rows = cursor.fetchall()
-
-    return rows

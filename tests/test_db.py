@@ -116,7 +116,7 @@ def make_entry(conn, client_id):
 
 def make_invoice(conn, client_id, entry_ids):
     invoice_id = conn.execute(
-        "INSERT INTO invoices (client_id, date_generated, status) VALUES (?, 0, 'draft')",
+        "INSERT INTO invoices (client_id, date_generated, period_start, period_end, status) VALUES (?, 0, '2026-09-01', '2026-09-14', 'draft')",
         (client_id,),
     ).lastrowid
     for entry_id in entry_ids:
@@ -186,8 +186,8 @@ def test_draft_cannot_have_number(conn):
     client = make_client(conn, "Acme")
     with pytest.raises(sq.IntegrityError):
         conn.execute(
-            "INSERT INTO invoices (client_id, invoice_number, date_generated, status) "
-            "VALUES (?, 1, 0, 'draft')",
+            "INSERT INTO invoices (client_id, invoice_number, date_generated, period_start, period_end, status) "
+            "VALUES (?, 1, 0, '2026-09-01', '2026-09-14', 'draft')",
             (client,),
         )
 
@@ -210,6 +210,25 @@ def test_invoice_numbers_are_per_client(conn):
         issue(conn, make_invoice(conn, acme, []), 1)
 
 
+def test_open_entry_cannot_be_invoiced(conn):
+    client = make_client(conn, "Acme")
+    entry = conn.execute(
+        "INSERT INTO time_entries (start_time, client_id) VALUES (0, ?)", (client,)
+    ).lastrowid
+    with pytest.raises(sq.IntegrityError, match="open entries"):
+        make_invoice(conn, client, [entry])
+
+
+def test_invoiced_entry_cannot_be_reopened(conn):
+    client = make_client(conn, "Acme")
+    entry = make_entry(conn, client)
+    make_invoice(conn, client, [entry])
+    with pytest.raises(sq.IntegrityError, match="cannot be reopened"):
+        conn.execute(
+            "UPDATE time_entries SET end_time = NULL WHERE entry_id = ?", (entry,)
+        )
+
+
 # --- User info ---
 
 
@@ -226,4 +245,22 @@ def test_only_one_user_row(conn):
             "INSERT INTO user_info (first_name, last_name, address_line_1, "
             "address_line_2, city, state, zip_code) VALUES (?, ?, ?, ?, ?, ?, ?)",
             row,
+        )
+
+
+@pytest.mark.parametrize(
+    "start, end",
+    [
+        ("2026-09-14", "2026-09-01"),
+        ("2026-02-30", "2026-03-01"),
+        ("9/1/2026", "2026-09-14"),
+    ],
+)
+def test_invoice_period_must_be_valid(conn, start, end):
+    client = make_client(conn, "Acme")
+    with pytest.raises(sq.IntegrityError):
+        conn.execute(
+            "INSERT INTO invoices (client_id, date_generated, period_start, period_end, "
+            "status) VALUES (?, 0, ?, ?, 'draft')",
+            (client, start, end),
         )

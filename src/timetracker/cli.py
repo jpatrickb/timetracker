@@ -5,13 +5,22 @@
 # Command-line interface (entry point for `tt`)
 
 import functools
+import sqlite3 as sq
+import sys
+import threading
 from typing import Annotated
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from timetracker import clients, db
+from pathlib import Path
+
+from timetracker import clients, clock, db, report
+from timetracker.formats import default_filename
+from timetracker.formats.delimited import render_csv, render_tsv
+from timetracker.formats.json_format import render_json
+from timetracker.formats.table import render_markdown, render_table
 from timetracker.errors import TimeTrackerError
 
 app = typer.Typer(no_args_is_help=True)
@@ -50,6 +59,13 @@ Aliases = Annotated[
     list[str] | None,
     typer.Option("--alias", help="Alternate name. Repeat for several."),
 ]
+Client = Annotated[str | None, typer.Option("--client", help="Client name or alias.")]
+Project = Annotated[
+    str | None,
+    typer.Option("--project", help="Project name or alias. Implies its client."),
+]
+TIME_FORMAT = "HH:MM[:SS], optionally after YYYY-MM-DD"
+TIME_HELP = f"{TIME_FORMAT}. Defaults to now."
 
 
 # --- Clients ---
@@ -214,7 +230,426 @@ def project_list(
 def _rate_option(pay_rate: float | None, no_pay_rate: bool):
     """Turns the two rate flags into a rate, None, or UNSET (flag not given)."""
     if no_pay_rate and pay_rate is not None:
-        raise TimeTrackerError("Use either --pay-rate-hourly or --no-pay-rate, not both.")
+        raise TimeTrackerError(
+            "Use either --pay-rate-hourly or --no-pay-rate, not both."
+        )
     if no_pay_rate:
         return None
     return clients.UNSET if pay_rate is None else pay_rate
+
+
+# --- Time entries ---
+
+
+def _warn(message: str):
+    err_console.print(f"[yellow]Warning:[/yellow] {message}")
+
+
+def _parse(text: str | None):
+    """Parses an optional time flag, warning if DST made it ambiguous."""
+    return clock.parse_time(text, warn=_warn) if text else None
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty()
+
+
+def _project_after_client_change(
+    conn: sq.Connection, entry_id: int, client: str | None, project: str | None
+) -> str | None:
+    """
+    When --client moves an entry to a different client and no --project was
+    given, the entry's old project no longer fits and gets cleared. In an
+    interactive terminal, offer the new client's projects to pick from.
+    Returns the --project value to use.
+    """
+    if not client or project:
+        return project
+
+    entry = clock.get_entry(conn, entry_id)
+    client_id = clients.resolve_client(conn, client)
+    if entry["project_id"] is None or entry["client_id"] == client_id:
+        return None
+
+    console.print(
+        f"Project [bold]{entry['project_name']}[/bold] belongs to "
+        f"{entry['client_name']}, so it will be cleared."
+    )
+    projects = clients.list_projects(conn, client_id)
+    if not projects or not _interactive():
+        return None
+
+    for number, row in enumerate(projects, start=1):
+        console.print(f"  {number}. {row['project_name']}")
+    while True:
+        choice = typer.prompt(
+            "Pick a project by number or name (Enter for none)",
+            default="",
+            show_default=False,
+        ).strip()
+        if not choice:
+            return None
+        if choice.isdigit() and 1 <= int(choice) <= len(projects):
+            return projects[int(choice) - 1]["project_name"]
+        try:
+            clients.resolve_project(conn, choice, client_id)
+            return choice
+        except TimeTrackerError as e:
+            err_console.print(f"[red]{e}[/red]")
+
+
+def _label(entry: sq.Row) -> str:
+    """e.g. 'TechForce Advisors / Website', or 'no client'."""
+    parts = [p for p in (entry["client_name"], entry["project_name"]) if p]
+    return " / ".join(parts) or "no client"
+
+
+def _warn_overlaps(overlaps: list[sq.Row]):
+    for entry in overlaps:
+        if entry["end_time"] is None:
+            span = f"clocked in since {clock.format_timestamp(entry['start_time'])}"
+        else:
+            span = (
+                f"{clock.format_timestamp(entry['start_time'])} to "
+                f"{clock.format_timestamp(entry['end_time'])}"
+            )
+        _warn(f"overlaps entry {entry['entry_id']} ({_label(entry)}, {span})")
+
+
+@app.command("in")
+@handle_errors
+def clock_in(
+    time: Annotated[str | None, typer.Option("--time", help=TIME_HELP)] = None,
+    client: Client = None,
+    project: Project = None,
+    desc: Annotated[
+        str | None, typer.Option("--desc", help="What you're working on.")
+    ] = None,
+    watch: Annotated[
+        bool, typer.Option("--watch", help="Show a running timer until you clock out.")
+    ] = False,
+):
+    """Clock in. Prints the entry ID you'll need to clock out."""
+    with db.connection() as conn:
+        entry_id, overlaps = clock.clock_in(conn, _parse(time), client, project, desc)
+        entry = clock.get_entry(conn, entry_id)
+        _warn_overlaps(overlaps)
+        console.print(
+            f"Clocked in: entry [bold]{entry_id}[/bold] ({_label(entry)}) "
+            f"at {clock.format_timestamp(entry['start_time'])}"
+        )
+        if watch:
+            _watch(conn, entry)
+
+
+def _watch(conn: sq.Connection, entry: sq.Row):
+    """
+    Shows the elapsed time, updating every second on a background thread,
+    while the main thread waits for Enter.
+    """
+    stop = threading.Event()
+
+    def tick():
+        while True:
+            elapsed = clock.format_duration(clock.now() - entry["start_time"])
+            sys.stdout.write(
+                f"\r  {elapsed}  (Enter to clock out, Ctrl+C to leave running) "
+            )
+            sys.stdout.flush()
+            if stop.wait(1):
+                return
+
+    ticker = threading.Thread(target=tick, daemon=True)
+    ticker.start()
+    try:
+        input()
+    except (KeyboardInterrupt, EOFError):
+        stop.set()
+        ticker.join()
+        console.print(f"\nStill clocked in as entry {entry['entry_id']}.")
+        return
+    stop.set()
+    ticker.join()
+
+    desc = typer.prompt("Add to description (optional)", default="", show_default=False)
+    clock.clock_out(conn, entry["entry_id"], description=desc or None)
+    _print_clocked_out(clock.get_entry(conn, entry["entry_id"]))
+
+
+def _print_clocked_out(entry: sq.Row):
+    console.print(
+        f"Clocked out: entry [bold]{entry['entry_id']}[/bold] ({_label(entry)}), "
+        f"{clock.format_duration(entry['duration'])}"
+    )
+
+
+@app.command("out")
+@handle_errors
+def clock_out(
+    entry_id: Annotated[
+        int | None, typer.Option("--id", help="Entry to clock out of.")
+    ] = None,
+    time: Annotated[str | None, typer.Option("--time", help=TIME_HELP)] = None,
+    client: Client = None,
+    project: Project = None,
+    desc: Annotated[
+        str | None,
+        typer.Option("--desc", help="Added to the end of the existing description."),
+    ] = None,
+):
+    """Clock out of an entry. A new client or project replaces the old one."""
+    with db.connection() as conn:
+        if entry_id is None:
+            open_ids = [str(e["entry_id"]) for e in clock.open_entries(conn)]
+            if not open_ids:
+                raise TimeTrackerError("You're not clocked in.")
+            raise TimeTrackerError(
+                f"Pass --id to choose an entry. Open entries: {', '.join(open_ids)}"
+            )
+
+        project = _project_after_client_change(conn, entry_id, client, project)
+        overlaps = clock.clock_out(conn, entry_id, _parse(time), client, project, desc)
+        _warn_overlaps(overlaps)
+        _print_clocked_out(clock.get_entry(conn, entry_id))
+
+
+@app.command("add")
+@handle_errors
+def add(
+    start_time: Annotated[str, typer.Option("--start-time", help=TIME_FORMAT)],
+    end_time: Annotated[str, typer.Option("--end-time", help=TIME_FORMAT)],
+    client: Client = None,
+    project: Project = None,
+    desc: Annotated[
+        str | None, typer.Option("--desc", help="What you worked on.")
+    ] = None,
+):
+    """Log a finished entry with both start and end times."""
+    with db.connection() as conn:
+        entry_id, overlaps = clock.add_entry(
+            conn,
+            clock.parse_time(start_time, warn=_warn),
+            clock.parse_time(end_time, warn=_warn),
+            client,
+            project,
+            desc,
+        )
+        entry = clock.get_entry(conn, entry_id)
+    _warn_overlaps(overlaps)
+    console.print(
+        f"Added entry [bold]{entry_id}[/bold] ({_label(entry)}), "
+        f"{clock.format_duration(entry['duration'])}"
+    )
+
+
+@app.command("edit")
+@handle_errors
+def edit(
+    entry_id: Annotated[int, typer.Argument(help="Entry to edit.")],
+    start_time: Annotated[
+        str | None, typer.Option("--start-time", help=TIME_FORMAT)
+    ] = None,
+    end_time: Annotated[
+        str | None, typer.Option("--end-time", help=TIME_FORMAT)
+    ] = None,
+    client: Client = None,
+    project: Project = None,
+    desc: Annotated[
+        str | None, typer.Option("--desc", help="Replaces the existing description.")
+    ] = None,
+    no_client: Annotated[
+        bool, typer.Option("--no-client", help="Remove the client (and project).")
+    ] = False,
+    no_project: Annotated[
+        bool, typer.Option("--no-project", help="Remove the project.")
+    ] = False,
+    no_desc: Annotated[
+        bool, typer.Option("--no-desc", help="Remove the description.")
+    ] = False,
+    reopen: Annotated[
+        bool, typer.Option("--reopen", help="Clear the end time, clocking back in.")
+    ] = False,
+    refresh_rate: Annotated[
+        bool,
+        typer.Option(
+            "--refresh-rate", help="Use the project's (or client's) current rate."
+        ),
+    ] = False,
+):
+    """Correct an entry's times, client, project, description, or rate."""
+    with db.connection() as conn:
+        project = _project_after_client_change(conn, entry_id, client, project)
+        overlaps = clock.edit_entry(
+            conn,
+            entry_id,
+            _parse(start_time),
+            _parse(end_time),
+            client,
+            project,
+            desc,
+            clear_client=no_client,
+            clear_project=no_project,
+            clear_description=no_desc,
+            reopen=reopen,
+            refresh_rate=refresh_rate,
+        )
+    _warn_overlaps(overlaps)
+    console.print(f"Entry {entry_id} updated.")
+
+
+@app.command("delete")
+@handle_errors
+def delete(
+    entry_id: Annotated[int, typer.Argument(help="Entry to delete.")],
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip the confirmation.")
+    ] = False,
+):
+    """Delete an entry permanently."""
+    with db.connection() as conn:
+        entry = clock.get_entry(conn, entry_id)
+        if not yes:
+            _print_entries([entry])
+            typer.confirm(f"Delete entry {entry_id}?", abort=True)
+        clock.delete_entry(conn, entry_id)
+    console.print(f"Deleted entry {entry_id}.")
+
+
+@app.command("status")
+@handle_errors
+def status():
+    """Show whether you're clocked in, and to what."""
+    with db.connection() as conn:
+        entries = clock.open_entries(conn)
+    if not entries:
+        console.print("Not clocked in.")
+        return
+    _print_entries(entries)
+
+
+def _print_entries(entries: list[sq.Row]):
+    table = Table("ID", "Client", "Project", "Start", "End", "Duration", "Description")
+    for e in entries:
+        is_open = e["end_time"] is None
+        duration = clock.now() - e["start_time"] if is_open else e["duration"]
+        table.add_row(
+            str(e["entry_id"]),
+            e["client_name"] or "",
+            e["project_name"] or "",
+            clock.format_timestamp(e["start_time"]),
+            "open" if is_open else clock.format_timestamp(e["end_time"]),
+            clock.format_duration(duration),
+            e["description"] or "",
+        )
+    console.print(table)
+
+
+# --- Reports ---
+
+# Output format -> (renderer, file extension). The terminal table is printed
+# directly, so it has no renderer to a string and can't be written to disk.
+TEXT_OUTPUTS = {
+    "md": (render_markdown, "md"),
+    "json": (render_json, "json"),
+    "csv": (render_csv, "csv"),
+    "tsv": (render_tsv, "tsv"),
+}
+OUTPUTS = ("table", *TEXT_OUTPUTS)
+
+
+@app.command("report")
+@handle_errors
+def report_command(
+    client: Annotated[
+        list[str] | None,
+        typer.Option("--client", help="Only this client. Repeat for several."),
+    ] = None,
+    project: Annotated[
+        list[str] | None,
+        typer.Option("--project", help="Only this project. Repeat for several."),
+    ] = None,
+    start: Annotated[
+        str | None, typer.Option("--start", help="First day, YYYY-MM-DD.")
+    ] = None,
+    end: Annotated[
+        str | None, typer.Option("--end", help="Last day (inclusive), YYYY-MM-DD.")
+    ] = None,
+    group_by: Annotated[
+        str, typer.Option("--group-by", help="entry, day, week, or month.")
+    ] = "entry",
+    fields: Annotated[
+        str | None,
+        typer.Option("--fields", help="Comma-separated columns, e.g. id,project,pay."),
+    ] = None,
+    output: Annotated[
+        str, typer.Option("--output", help="table, md, json, csv, or tsv.")
+    ] = "table",
+    write: Annotated[
+        bool, typer.Option("--write", help="Save to the reports folder.")
+    ] = False,
+    filename: Annotated[
+        str | None,
+        typer.Option(
+            "--filename", help="File name or path to save to. Implies --write."
+        ),
+    ] = None,
+):
+    """
+    Report logged time. Defaults to this week, one row per entry.
+
+    Entries count toward the range they start in. Open entries are left out.
+    """
+    if group_by not in report.GROUP_BY_OPTIONS:
+        raise TimeTrackerError(
+            f"Unknown --group-by '{group_by}'. Use {', '.join(report.GROUP_BY_OPTIONS)}."
+        )
+    if output not in OUTPUTS:
+        raise TimeTrackerError(
+            f"Unknown --output '{output}'. Use {', '.join(OUTPUTS)}."
+        )
+    if (write or filename) and output == "table":
+        raise TimeTrackerError(
+            "The terminal table can't be saved. Use --output md instead."
+        )
+
+    with db.connection() as conn:
+        result = report.build_report(
+            conn,
+            clients=client,
+            projects=project,
+            start=report.parse_date(start) if start else None,
+            end=report.parse_date(end) if end else None,
+            group_by=group_by,  # type: ignore[arg-type]  # checked above
+            fields=[f.strip() for f in fields.split(",")] if fields else None,
+        )
+
+    if result.skipped_open:
+        plural = "entry" if result.skipped_open == 1 else "entries"
+        _warn(f"{result.skipped_open} open {plural} not included.")
+
+    if output == "table":
+        console.print(render_table(result))
+        return
+
+    render, extension = TEXT_OUTPUTS[output]
+    text = render(result)
+    if not (write or filename):
+        # Plain print, not Rich, so the output can be piped or redirected as-is
+        sys.stdout.write(text)
+        return
+
+    path = _report_path(filename or default_filename(result, extension))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    console.print(f"Saved {path}")
+
+
+def _report_path(filename: str) -> Path:
+    """
+    A bare file name goes in the reports folder next to the database. A name
+    with a folder in it is used as given, relative to the current directory.
+    """
+    path = Path(filename).expanduser()
+    if path.is_absolute() or len(path.parts) > 1:
+        return path
+    return db.resolve_db_path().parent / "reports" / path

@@ -170,7 +170,12 @@ def cli(tmp_path, monkeypatch):
 
 
 def test_cli_add_and_list(cli):
-    assert cli("client", "add", "Acme", "--client-alias", "AC", "--pay-rate-hourly", "35").exit_code == 0
+    assert (
+        cli(
+            "client", "add", "Acme", "--client-alias", "AC", "--pay-rate-hourly", "35"
+        ).exit_code
+        == 0
+    )
     assert cli("project", "add", "ac", "Website").exit_code == 0
     result = cli("project", "list", "Acme")
     assert "Website" in result.output
@@ -186,5 +191,7 @@ def test_cli_error_is_clean(cli):
 
 def test_cli_rate_flags_conflict(cli):
     cli("client", "add", "Acme")
-    result = cli("project", "add", "Acme", "Site", "--pay-rate-hourly", "5", "--no-pay-rate")
+    result = cli(
+        "project", "add", "Acme", "Site", "--pay-rate-hourly", "5", "--no-pay-rate"
+    )
     assert result.exit_code == 1
