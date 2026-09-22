@@ -6,65 +6,89 @@
 
 import os
 import sqlite3 as sq
+import tomllib
 from pathlib import Path
 
 from pendulum import DateTime
 
-TIMETRACKER_DB = Path(
-    os.getenv("TIMETRACKER_DB", "~/TimeTracker/timetracker.db")
-).expanduser()
+DEFAULT_DB_PATH = Path("~/TimeTracker/timetracker.db")
+CONFIG_PATH = Path("~/.config/timetracker/config.toml")
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
-def init_db(db_path: Path = TIMETRACKER_DB):
+def resolve_db_path(db_path: str | Path | None = None) -> Path:
     """
-    Initializes the database, saving to `db_path`.
-    Uses migrations to ensure database is fully up to date.
+    Works out which database file to use.
 
-    :params:
-
+    Preference order: explicit argument, then the `TIMETRACKER_DB` environment
+    variable, then `db_path` in the config file, then the default location.
     """
-    # Make TimeTracker directory if not created
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if db_path is None:
+        db_path = os.getenv("TIMETRACKER_DB")
 
-    # Connect to database and set schema (doesn't create tables if they already exist)
-    conn = sq.connect(str(db_path))
-    cursor = conn.cursor()
+    # Only read the config file if nothing more specific was given
+    if not db_path:
+        config_file = CONFIG_PATH.expanduser()
+        if config_file.exists():
+            with open(config_file, "rb") as f:
+                db_path = tomllib.load(f).get("db_path")
 
-    cursor.execute("PRAGMA user_version;")
-    current_version = cursor.fetchone()[0]
+    return Path(db_path or DEFAULT_DB_PATH).expanduser()
 
-    # Apply updates
-    migrations_dir = Path(__file__).parent / "migrations"
+
+def migrate(conn: sq.Connection, migrations_dir: Path = MIGRATIONS_DIR):
+    """
+    Brings the database schema up to date by applying any migrations newer than
+    the version stored in `PRAGMA user_version`.
+
+    Each migration runs in its own transaction along with its version bump, so a
+    failing migration leaves the database exactly as it was before that step.
+    """
+    current_version = conn.execute("PRAGMA user_version;").fetchone()[0]
+
     migrations = sorted(migrations_dir.glob("*.sql"))
+    latest_version = int(migrations[-1].stem.split("_")[0]) if migrations else 0
+
+    # A newer app version already migrated this file--refuse rather than guess
+    if current_version > latest_version:
+        raise RuntimeError(
+            f"Database is at schema version {current_version}, but this version of "
+            f"timetracker only knows up to {latest_version}. Upgrade timetracker."
+        )
+
     for mig in migrations:
         mig_version = int(mig.stem.split("_")[0])
-        if mig_version > current_version:
-            with open(mig) as schema_file:
-                schema = schema_file.read()
-                cursor.executescript(schema)
-                cursor.execute(f"PRAGMA user_version = {mig_version};")
+        if mig_version <= current_version:
+            continue
 
-    conn.commit()
-    conn.close()
+        # executescript commits any open transaction before it runs, so the
+        # BEGIN/COMMIT have to live inside the script itself
+        script = f"BEGIN;\n{mig.read_text()}\nPRAGMA user_version = {mig_version};\nCOMMIT;"
+        try:
+            conn.executescript(script)
+        except sq.Error:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
 
 
-def connect(db_path: Path = TIMETRACKER_DB):
+def connect(db_path: str | Path | None = None) -> sq.Connection:
     """
-    Creates and returns a connection to the database, ensuring it exists.
-
-    :params:
+    Opens a connection to the database, creating the directory and applying
+    migrations first if needed.
     """
-    # Resolve the path
-    init_db(db_path)
+    path = resolve_db_path(db_path)
 
-    # Open connection and set pragmas
-    conn = sq.connect(str(db_path))
-    cursor = conn.cursor()
+    # Make TimeTracker directory if not created
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    cursor.execute("PRAGMA foreign_keys = ON;")
-
-    # Set row_factory
+    # The foreign_keys pragma is ignored inside a transaction, so it has to run
+    # before anything opens one
+    conn = sq.connect(path)
+    conn.execute("PRAGMA foreign_keys = ON;")
     conn.row_factory = sq.Row
+
+    migrate(conn)
 
     return conn
 
