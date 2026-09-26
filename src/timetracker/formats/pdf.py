@@ -15,6 +15,11 @@ from timetracker.report import Report
 from timetracker.user import address_lines, full_name
 
 
+# Roboto travels with the package, so an invoice typesets the same on a Mac, on
+# Windows, and on a bare WSL image that has no system fonts at all
+FONT_DIR = Path(__file__).parent.parent / "fonts"
+
+
 def render_pdf(document: InvoiceDocument, path: Path):
     try:
         import typst
@@ -30,12 +35,31 @@ def render_pdf(document: InvoiceDocument, path: Path):
     with tempfile.TemporaryDirectory() as folder:
         typ_file = Path(folder) / "invoice.typ"
         typ_file.write_text(source)
-        typst.compile(typ_file, output=path, root=Path(folder))
+        _compile(typst, typ_file, path, Path(folder))
+
+
+def _compile(typst, source_file: Path, path: Path, root: Path):
+    """
+    Typesets with only the bundled fonts, so nothing the machine has installed
+    can change the result. Older typst builds lack the flags, and fall back to
+    whatever they can find.
+    """
+    try:
+        typst.compile(
+            source_file,
+            output=path,
+            root=root,
+            font_paths=[FONT_DIR],
+            ignore_system_fonts=True,
+        )
+    except TypeError:
+        typst.compile(source_file, output=path, root=root)
 
 
 # The palette of docs/invoice-example/, shared with the spreadsheet
 INK = "#223642"
 STRIPE = "#f6f8f9"
+FONT = "Roboto"  # the one face bundled in fonts/, so it is always present
 
 
 def _typst_source(document: InvoiceDocument) -> str:
@@ -48,7 +72,7 @@ def _typst_source(document: InvoiceDocument) -> str:
 
     lines = [
         '#set page(paper: "us-letter", margin: 0.7in)',
-        '#set text(size: 10pt, font: "Arial")',
+        f'#set text(size: 10pt, font: "{FONT}")',
         f'#let ink = rgb("{INK}")',
         f'#let stripe = rgb("{STRIPE}")',
         "",
@@ -57,8 +81,8 @@ def _typst_source(document: InvoiceDocument) -> str:
         "  #grid(",
         "    columns: (1fr, auto),",
         "    align: (left + horizon, right + top),",
-        f'    text(fill: white, size: 18pt, weight: "bold", font: "Roboto")[{title}],',
-        f'    text(fill: white, font: "Roboto")[*INVOICE NUMBER:* {document.number}],',
+        f'    text(fill: white, size: 18pt, weight: "bold")[{title}],',
+        f"    text(fill: white)[*INVOICE NUMBER:* {document.number}],",
         "  )",
         "]",
         "",
@@ -129,9 +153,10 @@ def _address_block(heading: str, body_lines: list[str]) -> str:
     rule = "#line(length: 100%, stroke: 1.5pt + ink)"
     return "\n".join(
         [
-            f'#text(size: 12pt, weight: "bold", font: "Roboto")[{heading}]',
+            f'#text(size: 12pt, weight: "bold")[{heading}]',
             rule,
-            f'#text(font: "Roboto")[{_block(body_lines)}]',
+            # Bare, not wrapped in brackets: markup would print those literally
+            _block(body_lines),
             rule,
         ]
     )
@@ -173,7 +198,7 @@ def render_report_pdf(report: Report, path: Path):
     with tempfile.TemporaryDirectory() as folder:
         typ_file = Path(folder) / "report.typ"
         typ_file.write_text(source)
-        typst.compile(typ_file, output=path, root=Path(folder))
+        _compile(typst, typ_file, path, Path(folder))
 
 
 def _report_source(report: Report) -> str:
@@ -185,7 +210,7 @@ def _report_source(report: Report) -> str:
 
     lines = [
         f'#set page(paper: "us-letter", margin: 0.7in{flipped})',
-        "#set text(size: 9pt)",
+        f'#set text(size: 9pt, font: "{FONT}")',
         "#show heading: set text(size: 15pt)",
         "",
         "= Time Report",

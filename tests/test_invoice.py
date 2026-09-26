@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from timetracker import clients, clock, db, invoice, user
 from timetracker.cli import app
 from timetracker.errors import TimeTrackerError
-from timetracker.formats.pdf import _typst_source, render_pdf
+from timetracker.formats.pdf import FONT_DIR, _typst_source, render_pdf
 from timetracker.formats.xlsx import render_xlsx
 
 NOW = pendulum.local(2026, 9, 29, 12, 0, 0)
@@ -336,6 +336,30 @@ def test_pdf_is_written(document, tmp_path):
     path = tmp_path / "invoice.pdf"
     render_pdf(document, path)
     assert path.read_bytes().startswith(b"%PDF")
+
+
+def test_pdf_embeds_the_bundled_font(document, tmp_path):
+    """
+    Typst silently falls back to its default serif when a font is missing, which
+    is what a machine without Roboto installed (a bare WSL image) used to get.
+    """
+    path = tmp_path / "invoice.pdf"
+    render_pdf(document, path)
+    content = path.read_bytes()
+    assert b"Roboto" in content
+    assert b"Libertinus" not in content  # the fallback that means no font was found
+
+
+def test_pdf_address_blocks_are_not_wrapped_in_brackets(document):
+    """Typst markup prints a bare [...] literally, rather than grouping it."""
+    source = _typst_source(document)
+    assert "[Patrick Beal" not in source
+    assert "[TechForce Advisors]" not in source
+
+
+def test_bundled_fonts_ship_with_the_package():
+    names = {file.name for file in FONT_DIR.glob("*.ttf")}
+    assert names == {"Roboto-Regular.ttf", "Roboto-Bold.ttf"}
 
 
 def test_pdf_escapes_typst_markup(conn):

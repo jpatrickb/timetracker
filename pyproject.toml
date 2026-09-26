@@ -29,6 +29,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/timetracker"]
+# The bundled Roboto files are data, not code, so they need naming explicitly
+artifacts = ["src/timetracker/fonts/*.ttf"]
 
 [dependency-groups]
 dev = [

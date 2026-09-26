@@ -25,7 +25,9 @@ MONEY_FORMAT = '"$"#,##0.00'
 INK = "223642"  # the dark navy of the banner and the table's rules
 PAPER = "FFFFFF"
 STRIPE = "F6F8F9"  # every second table row
-BANNER_FONT = "Roboto"
+# Excel can't embed a font, so the workbook asks for one its viewers will have.
+# Arial ships with Excel on both Windows and macOS; the PDF uses bundled Roboto.
+BANNER_FONT = "Arial"
 TABLE_FONT = "Arial"
 TABLE_ROW_HEIGHT = 22.5
 TITLE_LINE_HEIGHT = 24  # the banner's 18pt text, with its leading
