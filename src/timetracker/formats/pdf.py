@@ -33,36 +33,59 @@ def render_pdf(document: InvoiceDocument, path: Path):
         typst.compile(typ_file, output=path, root=Path(folder))
 
 
+# The palette of docs/invoice-example/, shared with the spreadsheet
+INK = "#223642"
+STRIPE = "#f6f8f9"
+
+
 def _typst_source(document: InvoiceDocument) -> str:
     user = document.user
     sender = [full_name(user), *address_lines(user)]
 
+    title = f"HOURLY INVOICE \\\n{_esc(period_label(document))}"
+    if document.predicted:
+        title += " \\\n(DRAFT)"
+
     lines = [
-        '#set page(paper: "us-letter", margin: 0.9in)',
-        "#set text(size: 10pt)",
-        "#show heading: set text(size: 16pt)",
+        '#set page(paper: "us-letter", margin: 0.7in)',
+        '#set text(size: 10pt, font: "Arial")',
+        f'#let ink = rgb("{INK}")',
+        f'#let stripe = rgb("{STRIPE}")',
         "",
-        f"= HOURLY INVOICE {_esc(period_label(document))}",
+        # The banner: title on the left, invoice number on the right
+        "#block(fill: ink, inset: 12pt, width: 100%)[",
+        "  #grid(",
+        "    columns: (1fr, auto),",
+        "    align: (left + horizon, right + top),",
+        f'    text(fill: white, size: 18pt, weight: "bold", font: "Roboto")[{title}],',
+        f'    text(fill: white, font: "Roboto")[*INVOICE NUMBER:* {document.number}],',
+        "  )",
+        "]",
         "",
-        "#grid(",
-        "  columns: (1fr, auto),",
-        "  [",
-        f"    *From:* \\\n{_block(sender)}",
+        "#v(1.2em)",
+        # Each address block sits over a rule, as in the example
+        _address_block("From:", sender),
         "",
-        f"    *Bill To:* \\\n{_esc(document.client_name)}",
-        "  ],",
-        "  [",
-        f"    #align(right)[*INVOICE NUMBER:* {document.number}"
-        + (" \\\n#text(fill: red)[DRAFT]" if document.predicted else "")
-        + "]",
-        "  ],",
-        ")",
+        _address_block("Bill To:", [document.client_name]),
         "",
-        "#v(1em)",
+        "#v(0.4em)",
         "#table(",
         "  columns: (auto, auto, auto, auto, 1fr),",
-        "  align: (left, left, right, right, left),",
-        "  table.header([*Date*], [*Project*], [*Hours*], [*Amount*], [*Description*]),",
+        "  align: (left + horizon, left + horizon, right + horizon, "
+        "right + horizon, left + horizon),",
+        "  inset: 7pt,",
+        "  stroke: 0.5pt + ink,",
+        # Row 0 is the header; data rows alternate white and the stripe shade
+        "  fill: (_, row) => if row == 0 { ink } "
+        "else if calc.odd(row) { white } else { stripe },",
+        "  table.header(",
+        "    "
+        + ", ".join(
+            f'text(fill: white, weight: "bold")[{heading}]'
+            for heading in ("Date", "Project", "Hours", "Amount", "Description")
+        )
+        + ",",
+        "  ),",
     ]
 
     for row in document.rows:
@@ -81,7 +104,6 @@ def _typst_source(document: InvoiceDocument) -> str:
         )
 
     lines += [
-        "  table.hline(),",
         "  "
         + ", ".join(
             [
@@ -100,6 +122,19 @@ def _typst_source(document: InvoiceDocument) -> str:
         lines += ["", "#v(1em)", _esc(user["payment_notes"])]
 
     return "\n".join(lines) + "\n"
+
+
+def _address_block(heading: str, body_lines: list[str]) -> str:
+    """A bold label and its lines, each underlined by a rule like the example's."""
+    rule = "#line(length: 100%, stroke: 1.5pt + ink)"
+    return "\n".join(
+        [
+            f'#text(size: 12pt, weight: "bold", font: "Roboto")[{heading}]',
+            rule,
+            f'#text(font: "Roboto")[{_block(body_lines)}]',
+            rule,
+        ]
+    )
 
 
 def _money(cents: int | None) -> str:
