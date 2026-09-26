@@ -21,11 +21,24 @@ DATE_FORMAT = "M/d/yyyy"
 HOURS_FORMAT = "[h]:mm:ss"  # counts past 24 hours instead of wrapping
 MONEY_FORMAT = '"$"#,##0.00'
 
+# The palette and metrics of docs/invoice-example/
+INK = "223642"  # the dark navy of the banner and the table's rules
+PAPER = "FFFFFF"
+STRIPE = "F6F8F9"  # every second table row
+BANNER_FONT = "Roboto"
+TABLE_FONT = "Arial"
+TABLE_ROW_HEIGHT = 22.5
+TITLE_LINE_HEIGHT = 24  # the banner's 18pt text, with its leading
+COLUMNS = "BCDEF"  # A and G are the left and right margins
+WIDTHS = {"D": 13.25, "F": 46.25}  # the rest keep the default width
+DEFAULT_WIDTH = 12.63
+
 
 def render_xlsx(document: InvoiceDocument, path: Path):
     try:
         from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Font
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.worksheet.properties import PageSetupProperties
     except ImportError:
         raise TimeTrackerError(
             "Excel output needs openpyxl. Reinstall the app with `uv sync`."
@@ -35,68 +48,153 @@ def render_xlsx(document: InvoiceDocument, path: Path):
     sheet = workbook.active
     assert sheet is not None
     sheet.title = "Invoice"
-    bold = Font(bold=True)
 
+    banner_fill = PatternFill("solid", fgColor=INK)
+    stripe_fill = PatternFill("solid", fgColor=STRIPE)
+    paper_fill = PatternFill("solid", fgColor=PAPER)
+    rule = Side(style="thick", color=INK)
+    thin = Side(style="thin", color=INK)
+    grid = Border(left=thin, right=thin, top=thin, bottom=thin)
+    white = Font(name=BANNER_FONT, color=PAPER)
+    label = Font(name=BANNER_FONT, bold=True, size=12)
+
+    # --- Banner ---
     title = f"HOURLY INVOICE\n{period_label(document)}"
     if document.predicted:
         title += "\n(DRAFT)"
-    sheet["B1"] = title
-    sheet["B1"].font = bold
-    sheet["B1"].alignment = Alignment(wrap_text=True)
     sheet.merge_cells("B1:D1")
+    sheet["B1"] = title
+    sheet["B1"].font = Font(name=BANNER_FONT, bold=True, size=18, color=PAPER)
+    sheet["B1"].alignment = Alignment(wrap_text=True, vertical="center")
     sheet["E1"] = "INVOICE NUMBER:"
+    sheet["E1"].alignment = Alignment(horizontal="right", vertical="top")
     sheet["F1"] = document.number
+    sheet["F1"].alignment = Alignment(horizontal="left", vertical="top")
+    for column in "ABCDEFG":
+        cell = sheet[f"{column}1"]
+        cell.fill = banner_fill
+        cell.border = Border(bottom=rule)
+        if cell.font.color is None or cell.font.color.rgb != f"00{PAPER}":
+            cell.font = white
+    # Excel won't autofit a merged cell, so the banner is sized to its lines
+    sheet.row_dimensions[1].height = TITLE_LINE_HEIGHT * title.count("\n") + 30
 
-    sheet["B3"] = "From:"
-    sheet["B3"].font = bold
-    sheet["B4"] = full_name(document.user)
-    for offset, line in enumerate(address_lines(document.user), start=5):
-        sheet[f"B{offset}"] = line
+    # --- Address blocks, each headed by a labeled rule ---
+    row_number = 3
+    row_number = _block(sheet, row_number, "From:", _sender(document), label, rule)
+    row_number = _block(
+        sheet, row_number, "Bill To:", [document.client_name], label, rule
+    )
 
-    row_number = 5 + len(address_lines(document.user)) + 1
-    sheet[f"B{row_number}"] = "Bill To:"
-    sheet[f"B{row_number}"].font = bold
-    row_number += 1
-    sheet[f"B{row_number}"] = document.client_name
-
-    row_number += 2
-    for column, heading in zip("BCDEF", HEADERS):
-        cell = sheet[f"{column}{row_number}"]
+    # --- Table ---
+    header_row = row_number
+    for column, heading in zip(COLUMNS, HEADERS):
+        cell = sheet[f"{column}{header_row}"]
         cell.value = heading
-        cell.font = bold
+        cell.font = Font(name=TABLE_FONT, bold=True, color=PAPER)
+        cell.fill = banner_fill
+        cell.border = grid
+        cell.alignment = Alignment(vertical="center")
+    sheet.row_dimensions[header_row].height = TABLE_ROW_HEIGHT
 
-    for line in document.rows:
-        row_number += 1
+    for offset, line in enumerate(document.rows, start=1):
+        row_number = header_row + offset
         sheet[f"B{row_number}"] = line.day
-        sheet[f"B{row_number}"].number_format = DATE_FORMAT
         sheet[f"C{row_number}"] = line.project or ""
         sheet[f"D{row_number}"] = timedelta(seconds=line.seconds)
-        sheet[f"D{row_number}"].number_format = HOURS_FORMAT
-        if line.cents is not None:
-            sheet[f"E{row_number}"] = line.cents / 100
-            sheet[f"E{row_number}"].number_format = MONEY_FORMAT
+        sheet[f"E{row_number}"] = _amount(line, row_number)
         sheet[f"F{row_number}"] = line.description or ""
-        sheet[f"F{row_number}"].alignment = Alignment(wrap_text=True, vertical="top")
+        # Stripes start on the paper shade, as in the example
+        shade = paper_fill if offset % 2 else stripe_fill
+        _style_table_row(sheet, row_number, grid, shade)
 
-    row_number += 1
-    sheet[f"B{row_number}"] = "Total"
-    sheet[f"D{row_number}"] = timedelta(seconds=document.total_seconds)
-    sheet[f"D{row_number}"].number_format = HOURS_FORMAT
-    if document.total_cents is not None:
-        sheet[f"E{row_number}"] = document.total_cents / 100
-        sheet[f"E{row_number}"].number_format = MONEY_FORMAT
-    for column in "BCDEF":
-        sheet[f"{column}{row_number}"].font = bold
+    total_row_number = header_row + len(document.rows) + 1
+    first = header_row + 1
+    last = total_row_number - 1
+    sheet[f"B{total_row_number}"] = "Total"
+    sheet[f"D{total_row_number}"] = f"=SUM(D{first}:D{last})"
+    sheet[f"E{total_row_number}"] = f"=SUM(E{first}:E{last})"
+    _style_table_row(sheet, total_row_number, grid, paper_fill)
+    for column in COLUMNS:
+        cell = sheet[f"{column}{total_row_number}"]
+        cell.font = Font(name=TABLE_FONT, bold=True)
 
     if document.user["payment_notes"]:
-        row_number += 2
-        sheet[f"B{row_number}"] = document.user["payment_notes"]
+        notes_row = total_row_number + 2
+        sheet[f"B{notes_row}"] = document.user["payment_notes"]
+        sheet[f"B{notes_row}"].font = Font(name=BANNER_FONT)
 
-    for column, width in zip("BCDEF", (12, 18, 12, 12, 50)):
+    # --- Sheet setup ---
+    sheet.sheet_view.showGridLines = False
+    sheet.sheet_format.defaultColWidth = DEFAULT_WIDTH
+    for column, width in WIDTHS.items():
         sheet.column_dimensions[column].width = width
+    sheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    sheet.page_setup.orientation = "portrait"
+    sheet.page_setup.fitToHeight = 0
+    sheet.print_options.horizontalCentered = True
 
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(path)
+
+
+def _sender(document: InvoiceDocument) -> list[str]:
+    return [full_name(document.user), *address_lines(document.user)]
+
+
+def _block(sheet, row_number: int, heading: str, lines: list[str], label, rule) -> int:
+    """
+    One address block: a bold label, its lines, and a rule under each, like
+    the example's. Returns the first free row two below it.
+    """
+    from openpyxl.styles import Font, PatternFill
+
+    sheet[f"B{row_number}"] = heading
+    sheet[f"B{row_number}"].font = label
+    sheet[f"B{row_number}"].fill = PatternFill("solid", fgColor=PAPER)
+    _rule_across(sheet, row_number, rule)
+
+    for offset, line in enumerate(lines, start=1):
+        cell = sheet[f"B{row_number + offset}"]
+        cell.value = line
+        # The name leads the block, so it carries the weight
+        cell.font = Font(name=BANNER_FONT, bold=offset == 1)
+
+    last = row_number + len(lines)
+    _rule_across(sheet, last, rule)
+    return last + 2
+
+
+def _rule_across(sheet, row_number: int, rule):
+    from openpyxl.styles import Border
+
+    for column in COLUMNS:
+        sheet[f"{column}{row_number}"].border = Border(bottom=rule)
+
+
+def _style_table_row(sheet, row_number: int, grid, fill):
+    from openpyxl.styles import Alignment, Font
+
+    sheet.row_dimensions[row_number].height = TABLE_ROW_HEIGHT
+    formats = {"B": DATE_FORMAT, "D": HOURS_FORMAT, "E": MONEY_FORMAT}
+    for column in COLUMNS:
+        cell = sheet[f"{column}{row_number}"]
+        cell.font = Font(name=TABLE_FONT)
+        cell.fill = fill
+        cell.border = grid
+        cell.alignment = Alignment(vertical="center", wrap_text=column == "F")
+        if column in formats:
+            cell.number_format = formats[column]
+
+
+def _amount(line, row_number: int):
+    """
+    The example shows its arithmetic, so a known rate becomes a formula over
+    the hours cell. Rows billed at mixed rates fall back to their total.
+    """
+    if line.rate is not None:
+        return f"=D{row_number}*24*{line.rate:g}"
+    return None if line.cents is None else line.cents / 100
 
 
 # --- Reports ---

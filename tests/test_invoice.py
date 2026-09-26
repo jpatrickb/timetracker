@@ -270,13 +270,66 @@ def test_xlsx_layout(document, tmp_path):
         "Description",
     ]
     first = header_row + 1
-    assert sheet[f"E{first}"].value == 103.71
+    # Amounts show their arithmetic off the hours cell, as the example does
+    assert sheet[f"E{first}"].value == f"=D{first}*24*35"
     assert sheet[f"D{first}"].number_format == "[h]:mm:ss"
     assert sheet[f"B{first}"].number_format == "M/d/yyyy"
+    assert sheet[f"E{first}"].number_format == '"$"#,##0.00'
 
     total_row = header_row + 1 + len(document.rows)
+    last = total_row - 1
     assert sheet[f"B{total_row}"].value == "Total"
-    assert sheet[f"E{total_row}"].value == 235.74
+    assert sheet[f"D{total_row}"].value == f"=SUM(D{first}:D{last})"
+    assert sheet[f"E{total_row}"].value == f"=SUM(E{first}:E{last})"
+
+
+def test_xlsx_matches_the_example_styling(document, tmp_path):
+    path = tmp_path / "invoice.xlsx"
+    render_xlsx(document, path)
+    sheet = openpyxl.load_workbook(path).active
+    assert sheet is not None
+
+    # The banner spans the full width in the example's navy, with white text
+    assert sheet.sheet_view.showGridLines is False
+    assert sheet["A1"].fill.fgColor.rgb == "00223642"
+    assert sheet["G1"].fill.fgColor.rgb == "00223642"
+    assert sheet["B1"].font.color.rgb == "00FFFFFF"
+    assert sheet["B1"].font.size == 18
+
+    header_row = next(
+        row for row in range(1, sheet.max_row + 1) if sheet[f"B{row}"].value == "Date"
+    )
+    # The table header takes the navy too, and every cell is ruled thin
+    assert sheet[f"B{header_row}"].fill.fgColor.rgb == "00223642"
+    assert sheet[f"B{header_row}"].border.bottom.style == "thin"
+    assert sheet.row_dimensions[header_row].height == 22.5
+
+    # Rows alternate white and the example's off-white stripe
+    assert sheet[f"B{header_row + 1}"].fill.fgColor.rgb == "00FFFFFF"
+    assert sheet[f"B{header_row + 2}"].fill.fgColor.rgb == "00F6F8F9"
+
+
+def test_xlsx_falls_back_to_a_value_when_a_row_mixes_rates(conn, tmp_path):
+    first = add(conn, "2026-09-01 09:00", "2026-09-01 10:00", project="Extraction")
+    second = add(conn, "2026-09-01 11:00", "2026-09-01 12:00", project="Extraction")
+    # A re-rated entry lands on the same row as one billed at the old rate
+    with conn:
+        conn.execute(
+            "UPDATE time_entries SET pay_rate_hourly = 50 WHERE entry_id = ?", (second,)
+        )
+    document = invoice.build_document(conn, draft(conn, [first, second]))
+
+    (line,) = document.rows
+    assert line.rate is None  # $35 and $50 can't share one formula
+
+    path = tmp_path / "invoice.xlsx"
+    render_xlsx(document, path)
+    sheet = openpyxl.load_workbook(path).active
+    assert sheet is not None
+    header_row = next(
+        row for row in range(1, sheet.max_row + 1) if sheet[f"B{row}"].value == "Date"
+    )
+    assert sheet[f"E{header_row + 1}"].value == 85.0
 
 
 def test_pdf_is_written(document, tmp_path):

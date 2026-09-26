@@ -24,6 +24,9 @@ class InvoiceRow:
     seconds: int
     cents: int | None
     description: str | None
+    # The hourly rate behind `cents`, so a renderer can show the arithmetic.
+    # None when the row's entries were billed at differing rates.
+    rate: float | None = None
 
 
 @dataclass
@@ -220,7 +223,8 @@ def build_document(conn: sq.Connection, invoice_id: int) -> InvoiceDocument:
 
     entries = conn.execute(
         """
-        SELECT e.start_time, e.end_time, e.description, e.total_pay, p.project_name
+        SELECT e.start_time, e.end_time, e.description, e.total_pay,
+            e.pay_rate_hourly, p.project_name
         FROM invoice_entries AS ie
         JOIN time_entries AS e ON e.entry_id = ie.entry_id
         LEFT JOIN projects AS p ON p.project_id = e.project_id
@@ -256,6 +260,7 @@ def _line_items(entries: list[sq.Row]) -> list[InvoiceRow]:
     exact totals.
     """
     groups: dict[tuple[date, str | None], InvoiceRow] = {}
+    rates: dict[tuple[date, str | None], set[float | None]] = {}
     for entry in entries:
         pieces = report.split_periods(entry["start_time"], entry["end_time"], "day")
         cents = report.to_cents(entry["total_pay"])
@@ -275,6 +280,12 @@ def _line_items(entries: list[sq.Row]) -> list[InvoiceRow]:
             if share is not None:
                 row.cents = (row.cents or 0) + share
             row.description = _join(row.description, entry["description"])
+            rates.setdefault(key, set()).add(entry["pay_rate_hourly"])
+
+    for key, row in groups.items():
+        # One shared rate can be shown as arithmetic; a mix of them can't
+        seen = rates[key]
+        row.rate = seen.pop() if len(seen) == 1 else None
 
     return [groups[key] for key in sorted(groups, key=lambda k: (k[0], k[1] or ""))]
 
